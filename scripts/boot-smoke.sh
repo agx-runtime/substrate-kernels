@@ -61,11 +61,29 @@ esac
 
 command -v "$bin" >/dev/null || { echo "[boot-smoke] FATAL: $bin not installed" >&2; exit 1; }
 
-echo "[boot-smoke] booting $ARCH kernel under QEMU (timeout ${TIMEOUT}s)..."
-timeout "${TIMEOUT}" "$bin" "${args[@]}" >"$log" 2>&1 || true
+MARKER='Linux version|Booting Linux|Kernel command line'
 
-if grep -qiE 'Linux version|Booting Linux|Kernel command line' "$log"; then
-	echo "[boot-smoke] PASS — kernel booted (banner observed):"
+# Run QEMU in the background and poll its console. With no rootfs the guest panics
+# on VFS and just sits there (it never reboots), so we must NOT wait for QEMU to
+# exit — we kill it the instant the banner appears. The timeout is only the
+# upper bound for a kernel that never reaches the banner (a real boot failure).
+echo "[boot-smoke] booting $ARCH kernel under QEMU ($accel; ${TIMEOUT}s ceiling)..."
+"$bin" "${args[@]}" >"$log" 2>&1 &
+qpid=$!
+
+ok=0
+deadline=$((SECONDS + TIMEOUT))
+while kill -0 "$qpid" 2>/dev/null; do
+	if grep -qiE "$MARKER" "$log"; then ok=1; break; fi
+	if [ "$SECONDS" -ge "$deadline" ]; then break; fi
+	sleep 1
+done
+
+kill "$qpid" 2>/dev/null || true
+wait "$qpid" 2>/dev/null || true
+
+if [ "$ok" -eq 1 ] || grep -qiE "$MARKER" "$log"; then
+	echo "[boot-smoke] PASS — kernel booted (banner observed after ~$((SECONDS - (deadline - TIMEOUT)))s):"
 	grep -iE 'Linux version|Booting Linux' "$log" | head -1
 	exit 0
 fi
