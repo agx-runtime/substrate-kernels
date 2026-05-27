@@ -124,15 +124,21 @@ jobs:
           https://kernels.substrate.loopholelabs.io/linux-$VERSION-base-x86_64.kernel
           (and the aarch64 bundle + \`linux-$VERSION-SHA256SUMS\`).
           EOF
-      - name: Create the GitHub Release
+      - name: Create or update the GitHub Release
         run: |
-          gh release create "$TAG" \
-            "linux-${VERSION}-base-x86_64.kernel" \
-            "linux-${VERSION}-base-aarch64.kernel" \
-            SHA256SUMS \
-            --repo "$GITHUB_REPOSITORY" \
-            --title "substrate-kernel $TAG (linux $VERSION)" \
-            --notes-file RELEASE_NOTES.md
+          set -euo pipefail
+          assets=( "linux-${VERSION}-base-x86_64.kernel" "linux-${VERSION}-base-aarch64.kernel" SHA256SUMS )
+          # Idempotent: if a prior run already created the release (e.g. the R2 mirror
+          # failed afterwards), re-attach the assets instead of failing on collision.
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "release $TAG already exists — re-uploading assets (--clobber)"
+            gh release upload "$TAG" "${assets[@]}" --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$TAG" "${assets[@]}" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "substrate-kernel $TAG (linux $VERSION)" \
+              --notes-file RELEASE_NOTES.md
+          fi
 
       # ---- mirror to Cloudflare R2 (skipped if secrets are unset) ---------------
       - name: Upload x86_64 bundle to R2
