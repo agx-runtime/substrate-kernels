@@ -27,18 +27,30 @@ done
 log="$(mktemp)"
 trap 'rm -f "$log"' EXIT
 
+# Use KVM when the guest arch matches the host and /dev/kvm is usable (near-native,
+# e.g. aarch64 on an arm64 runner); otherwise fall back to TCG emulation. `-cpu host`
+# is only valid under KVM, so it is paired with the accelerator.
+HOSTARCH="$(uname -m)"
+if [ "$ARCH" = "$HOSTARCH" ] && [ -r /dev/kvm ]; then
+	accel=kvm; cpu=host
+	echo "[boot-smoke] /dev/kvm usable and guest arch == host ($HOSTARCH) — using KVM"
+else
+	accel=tcg; cpu=max
+	echo "[boot-smoke] using TCG (guest=$ARCH host=$HOSTARCH; /dev/kvm $([ -e /dev/kvm ] && echo present || echo absent))"
+fi
+
 # `panic=-1` would reboot; we keep the guest alive briefly and rely on the timeout.
 # No rootfs is supplied — the kernel boots, prints its banner, then panics on VFS,
 # which is exactly the "kernel ran" signal we want for the interim check.
 case "$ARCH" in
 	x86_64)
 		bin="qemu-system-x86_64"
-		args=(-machine q35 -cpu max -m 512 -nographic -no-reboot
+		args=(-machine "q35,accel=$accel" -cpu "$cpu" -m 512 -nographic -no-reboot
 		      -kernel "$KERNEL" -append "console=ttyS0 earlyprintk=ttyS0")
 		;;
 	aarch64)
 		bin="qemu-system-aarch64"
-		args=(-machine virt -cpu max -m 512 -nographic -no-reboot
+		args=(-machine "virt,accel=$accel" -cpu "$cpu" -m 512 -nographic -no-reboot
 		      -kernel "$KERNEL" -append "console=ttyAMA0 earlycon")
 		;;
 	*)

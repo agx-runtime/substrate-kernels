@@ -59,16 +59,18 @@ jobs:
   # ---- build the release bundles (base × {x86_64, aarch64}) ---------------------
   build:
     needs: prepare
-    runs-on:
-      - nscloud-ubuntu-24.04-amd64-8x16-with-cache;github.run-id=${{ github.run_id }}
-      - nscloud-cache-size-50gb
-      - nscloud-cache-tag-substrate-kernel-amd64
-      - nscloud-container-image-cache
-      - namespace-features:container.privileged=true
     strategy:
       fail-fast: true # never publish a partial release
       matrix:
-        arch: [x86_64, aarch64]
+        include:
+          - { arch: x86_64, rarch: amd64 }
+          - { arch: aarch64, rarch: arm64 }
+    runs-on:
+      - nscloud-ubuntu-24.04-${{ matrix.rarch }}-8x16-with-cache;github.run-id=${{ github.run_id }}
+      - nscloud-cache-size-50gb
+      - nscloud-cache-tag-substrate-kernel-${{ matrix.rarch }}
+      - nscloud-container-image-cache
+      - namespace-features:container.privileged=true
     steps:
       - uses: actions/checkout@v6
       - name: Cache the pinned kernel tarball

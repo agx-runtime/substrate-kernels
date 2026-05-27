@@ -57,16 +57,18 @@ jobs:
 
   # ---- config-invariant: olddefconfig + required/forbidden per cell (ADR 0006) --
   config:
-    runs-on:
-      - nscloud-ubuntu-24.04-amd64-8x16-with-cache;github.run-id=${{ github.run_id }}
-      - nscloud-cache-size-50gb
-      - nscloud-cache-tag-substrate-kernel-amd64
-      - nscloud-container-image-cache
-      - namespace-features:container.privileged=true
     strategy:
       fail-fast: false
       matrix:
-        arch: [x86_64, aarch64]
+        include:
+          - { arch: x86_64, rarch: amd64 }
+          - { arch: aarch64, rarch: arm64 }
+    runs-on:
+      - nscloud-ubuntu-24.04-${{ matrix.rarch }}-8x16-with-cache;github.run-id=${{ github.run_id }}
+      - nscloud-cache-size-50gb
+      - nscloud-cache-tag-substrate-kernel-${{ matrix.rarch }}
+      - nscloud-container-image-cache
+      - namespace-features:container.privileged=true
     steps:
       - uses: actions/checkout@v6
       - name: Cache the pinned kernel tarball
@@ -83,16 +85,18 @@ jobs:
 
   # ---- full build → the .kernel bundle ------------------------------------------
   build:
-    runs-on:
-      - nscloud-ubuntu-24.04-amd64-8x16-with-cache;github.run-id=${{ github.run_id }}
-      - nscloud-cache-size-50gb
-      - nscloud-cache-tag-substrate-kernel-amd64
-      - nscloud-container-image-cache
-      - namespace-features:container.privileged=true
     strategy:
       fail-fast: false
       matrix:
-        arch: [x86_64, aarch64]
+        include:
+          - { arch: x86_64, rarch: amd64 }
+          - { arch: aarch64, rarch: arm64 }
+    runs-on:
+      - nscloud-ubuntu-24.04-${{ matrix.rarch }}-8x16-with-cache;github.run-id=${{ github.run_id }}
+      - nscloud-cache-size-50gb
+      - nscloud-cache-tag-substrate-kernel-${{ matrix.rarch }}
+      - nscloud-container-image-cache
+      - namespace-features:container.privileged=true
     steps:
       - uses: actions/checkout@v6
       - name: Cache the pinned kernel tarball
@@ -126,14 +130,16 @@ jobs:
   # this boots the produced kernel under QEMU and checks for the kernel banner.
   boot-smoke:
     needs: build
-    runs-on:
-      - nscloud-ubuntu-24.04-amd64-8x16-with-cache;github.run-id=${{ github.run_id }}
-      - nscloud-cache-size-50gb
-      - nscloud-cache-tag-substrate-kernel-amd64
     strategy:
       fail-fast: false
       matrix:
-        arch: [x86_64, aarch64]
+        include:
+          - { arch: x86_64, rarch: amd64 }
+          - { arch: aarch64, rarch: arm64 }
+    runs-on:
+      - nscloud-ubuntu-24.04-${{ matrix.rarch }}-8x16-with-cache;github.run-id=${{ github.run_id }}
+      - nscloud-cache-size-50gb
+      - nscloud-cache-tag-substrate-kernel-${{ matrix.rarch }}
     steps:
       - uses: actions/checkout@v6
       - uses: actions/download-artifact@v8
@@ -149,10 +155,16 @@ jobs:
   # from the build lane). Cross-host (macOS) determinism is exercised separately.
   repro-check:
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: x86_64, rarch: amd64 }
+          - { arch: aarch64, rarch: arm64 }
     runs-on:
-      - nscloud-ubuntu-24.04-amd64-8x16-with-cache;github.run-id=${{ github.run_id }}
+      - nscloud-ubuntu-24.04-${{ matrix.rarch }}-8x16-with-cache;github.run-id=${{ github.run_id }}
       - nscloud-cache-size-50gb
-      - nscloud-cache-tag-substrate-kernel-amd64
+      - nscloud-cache-tag-substrate-kernel-${{ matrix.rarch }}
       - nscloud-container-image-cache
       - namespace-features:container.privileged=true
     steps:
@@ -167,4 +179,4 @@ jobs:
       - name: Assert byte-identical rebuild
         run: |
           docker run --rm -v "$PWD":/work -w /work substrate-kernel-build \
-            make repro-check ARCH=x86_64 VARIANT=base
+            make repro-check ARCH=${{ matrix.arch }} VARIANT=base
