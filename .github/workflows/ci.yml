@@ -29,7 +29,7 @@ permissions:
 jobs:
   # ---- fast static gates (no kernel tree) ---------------------------------------
   static:
-    runs-on: ubuntu-24.04
+    runs-on: nscloud-ubuntu-24.04-amd64-2x4
     steps:
       - uses: actions/checkout@v6
       - name: Install pyelftools (the packer's ELF dependency)
@@ -39,7 +39,7 @@ jobs:
 
   # ---- patch series applies clean at -p1 with zero fuzz (ADR 0007) --------------
   applies-clean:
-    runs-on: ubuntu-24.04
+    runs-on: nscloud-ubuntu-24.04-amd64-2x4
     strategy:
       fail-fast: false
       matrix:
@@ -57,7 +57,12 @@ jobs:
 
   # ---- config-invariant: olddefconfig + required/forbidden per cell (ADR 0006) --
   config:
-    runs-on: ubuntu-24.04
+    runs-on:
+      - nscloud-ubuntu-24.04-amd64-8x16-with-cache;github.run-id=${{ github.run_id }}
+      - nscloud-cache-size-50gb
+      - nscloud-cache-tag-substrate-kernel-amd64
+      - nscloud-container-image-cache
+      - namespace-features:container.privileged=true
     strategy:
       fail-fast: false
       matrix:
@@ -78,7 +83,12 @@ jobs:
 
   # ---- full build → the .kernel bundle ------------------------------------------
   build:
-    runs-on: ubuntu-24.04
+    runs-on:
+      - nscloud-ubuntu-24.04-amd64-8x16-with-cache;github.run-id=${{ github.run_id }}
+      - nscloud-cache-size-50gb
+      - nscloud-cache-tag-substrate-kernel-amd64
+      - nscloud-container-image-cache
+      - namespace-features:container.privileged=true
     strategy:
       fail-fast: false
       matrix:
@@ -116,7 +126,10 @@ jobs:
   # this boots the produced kernel under QEMU and checks for the kernel banner.
   boot-smoke:
     needs: build
-    runs-on: ubuntu-24.04
+    runs-on:
+      - nscloud-ubuntu-24.04-amd64-8x16-with-cache;github.run-id=${{ github.run_id }}
+      - nscloud-cache-size-50gb
+      - nscloud-cache-tag-substrate-kernel-amd64
     strategy:
       fail-fast: false
       matrix:
@@ -136,7 +149,12 @@ jobs:
   # from the build lane). Cross-host (macOS) determinism is exercised separately.
   repro-check:
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-24.04
+    runs-on:
+      - nscloud-ubuntu-24.04-amd64-8x16-with-cache;github.run-id=${{ github.run_id }}
+      - nscloud-cache-size-50gb
+      - nscloud-cache-tag-substrate-kernel-amd64
+      - nscloud-container-image-cache
+      - namespace-features:container.privileged=true
     steps:
       - uses: actions/checkout@v6
       - name: Cache the pinned kernel tarball

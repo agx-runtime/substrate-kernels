@@ -30,7 +30,7 @@ concurrency:
 jobs:
   # ---- resolve the version (from the pin) and the release tag -------------------
   prepare:
-    runs-on: ubuntu-24.04
+    runs-on: nscloud-ubuntu-24.04-amd64-2x4
     outputs:
       version: ${{ steps.pin.outputs.version }}
       tag: ${{ steps.pin.outputs.tag }}
@@ -59,7 +59,12 @@ jobs:
   # ---- build the release bundles (base × {x86_64, aarch64}) ---------------------
   build:
     needs: prepare
-    runs-on: ubuntu-24.04
+    runs-on:
+      - nscloud-ubuntu-24.04-amd64-8x16-with-cache;github.run-id=${{ github.run_id }}
+      - nscloud-cache-size-50gb
+      - nscloud-cache-tag-substrate-kernel-amd64
+      - nscloud-container-image-cache
+      - namespace-features:container.privileged=true
     strategy:
       fail-fast: true # never publish a partial release
       matrix:
@@ -86,7 +91,7 @@ jobs:
   # ---- publish: GitHub Release + Cloudflare R2 ----------------------------------
   publish:
     needs: [prepare, build]
-    runs-on: ubuntu-24.04
+    runs-on: nscloud-ubuntu-24.04-amd64-2x4
     env:
       VERSION: ${{ needs.prepare.outputs.version }}
       TAG: ${{ needs.prepare.outputs.tag }}
