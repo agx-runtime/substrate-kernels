@@ -1,0 +1,152 @@
+name: Release
+
+# Build the .kernel bundles and publish them as a GitHub Release + mirror to
+# Cloudflare R2. Triggered by pushing a `v*` tag, or run manually (workflow_dispatch)
+# to cut a release from the current commit. The kernel version comes from the pin
+# (scripts/kernel-pin.env); the release tag is `v<version>` (or `v<version>-r<N>`
+# for a re-release of the same kernel after a patch/config change). CI gates the
+# commit; this workflow only builds + publishes. R2 upload is skipped if the
+# Cloudflare credentials are unset, so the GitHub Release still publishes.
+#
+# Config: secret CLOUDFLARE_API_TOKEN; variables CLOUDFLARE_ACCOUNT_ID + R2_BUCKET.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      revision:
+        description: "Optional revision suffix (e.g. r2) when re-releasing the same kernel version"
+        required: false
+        default: ""
+
+permissions:
+  contents: write # create the GitHub Release (and tag, on workflow_dispatch)
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # ---- resolve the version (from the pin) and the release tag -------------------
+  prepare:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.pin.outputs.version }}
+      tag: ${{ steps.pin.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: pin
+        run: |
+          set -euo pipefail
+          . scripts/kernel-pin.env
+          echo "version=$KERNEL_VERSION" >> "$GITHUB_OUTPUT"
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            tag="${{ github.ref_name }}"
+          else
+            rev="${{ inputs.revision }}"
+            tag="v${KERNEL_VERSION}${rev:+-$rev}"
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "Release: version=$KERNEL_VERSION tag=$tag"
+          # A tag-triggered release must match the pinned kernel version, so the
+          # artifact names (linux-<version>-…) and the tag cannot drift apart.
+          case "$tag" in
+            *"$KERNEL_VERSION"*) : ;;
+            *) echo "::error::release tag '$tag' does not contain pinned kernel version '$KERNEL_VERSION'"; exit 1 ;;
+          esac
+
+  # ---- build the release bundles (base × {x86_64, aarch64}) ---------------------
+  build:
+    needs: prepare
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: true # never publish a partial release
+      matrix:
+        arch: [x86_64, aarch64]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cache the pinned kernel tarball
+        uses: actions/cache@v4
+        with:
+          path: tarballs
+          key: kernel-tarball-${{ hashFiles('scripts/kernel-pin.env') }}
+      - name: Build the pinned toolchain container
+        run: docker build -t substrate-kernel-build tools/build
+      - name: Build the bundle (compile + pack) in the pinned container
+        run: |
+          docker run --rm -v "$PWD":/work -w /work substrate-kernel-build \
+            make all ARCH=${{ matrix.arch }} VARIANT=base
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bundle-${{ matrix.arch }}
+          path: linux-${{ needs.prepare.outputs.version }}-base-${{ matrix.arch }}.kernel
+          if-no-files-found: error
+
+  # ---- publish: GitHub Release + Cloudflare R2 ----------------------------------
+  publish:
+    needs: [prepare, build]
+    runs-on: ubuntu-24.04
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+      TAG: ${{ needs.prepare.outputs.tag }}
+      GH_TOKEN: ${{ github.token }}
+      # Proxy for "are the Cloudflare R2 credentials configured?" — gates the R2 steps.
+      CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: bundle-*
+          merge-multiple: true
+      - name: Compute SHA256SUMS
+        run: sha256sum "linux-${VERSION}-base-x86_64.kernel" "linux-${VERSION}-base-aarch64.kernel" | tee SHA256SUMS
+      - name: Write release notes
+        run: |
+          set -euo pipefail
+          . scripts/kernel-pin.env
+          cat > RELEASE_NOTES.md <<EOF
+          substrate-kernel \`$TAG\` — the pre-flattened \`.kernel\` bundles for substrate,
+          built from the pinned **linux $VERSION** (sha256 \`$KERNEL_SHA256\`).
+
+          **Artifacts** (base variant): \`linux-$VERSION-base-x86_64.kernel\`,
+          \`linux-$VERSION-base-aarch64.kernel\`, and \`SHA256SUMS\`. Builds are
+          byte-reproducible, so each bundle's sha256 is a stable content identity.
+
+          Also published to Cloudflare R2, served at
+          https://kernels.substrate.loopholelabs.io/linux-$VERSION-base-x86_64.kernel
+          (and the aarch64 bundle + \`linux-$VERSION-SHA256SUMS\`).
+          EOF
+      - name: Create the GitHub Release
+        run: |
+          gh release create "$TAG" \
+            "linux-${VERSION}-base-x86_64.kernel" \
+            "linux-${VERSION}-base-aarch64.kernel" \
+            SHA256SUMS \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "substrate-kernel $TAG (linux $VERSION)" \
+            --notes-file RELEASE_NOTES.md
+
+      # ---- mirror to Cloudflare R2 (skipped if secrets are unset) ---------------
+      - name: Upload x86_64 bundle to R2
+        if: ${{ env.CF_TOKEN != '' }}
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          command: r2 object put "${{ vars.R2_BUCKET }}/linux-${{ env.VERSION }}-base-x86_64.kernel" --file=linux-${{ env.VERSION }}-base-x86_64.kernel --remote
+      - name: Upload aarch64 bundle to R2
+        if: ${{ env.CF_TOKEN != '' }}
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          command: r2 object put "${{ vars.R2_BUCKET }}/linux-${{ env.VERSION }}-base-aarch64.kernel" --file=linux-${{ env.VERSION }}-base-aarch64.kernel --remote
+      - name: Upload SHA256SUMS to R2
+        if: ${{ env.CF_TOKEN != '' }}
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          # version-scoped so successive releases don't clobber it at the bucket root
+          command: r2 object put "${{ vars.R2_BUCKET }}/linux-${{ env.VERSION }}-SHA256SUMS" --file=SHA256SUMS --remote

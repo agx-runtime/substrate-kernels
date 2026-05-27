@@ -1,0 +1,9 @@
+# The patched kernel tree is derived from pin + patches — never checked in (ADR 0007).
+/build/
+# Fetched, sha256-verified tarballs — reconstructible from the pin (ADR 0001).
+/tarballs/
+# Produced bundles.
+*.kernel
+# Local Python noise.
+__pycache__/
+*.pyc

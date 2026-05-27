@@ -1,0 +1,152 @@
+name: CI
+
+# Gates for the substrate-kernel build (testing/strategy.md). Modeled on substrate's
+# CI: each gate is its own attributable job. The fast static/apply/config gates run
+# on every PR; the slow lanes (full kernel build, interim QEMU boot, repro-check)
+# run too but are the heavy ones. The Makefile — not this YAML — owns each gate's
+# invocation. CI covers x86_64 + aarch64 only (substrate's hosts); riscv64 and the
+# windows variant are carried but not CI-gated (ADR 0002).
+#
+# The Linux build stages run inside the pinned container (tools/build/Dockerfile) so
+# CI uses the same toolchain as a macOS dev host (ADR 0005). The container always
+# cross-compiles via the arch-prefixed toolchain, so both arches build from one
+# runner.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: read
+
+jobs:
+  # ---- fast static gates (no kernel tree) ---------------------------------------
+  static:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pyelftools (the packer's ELF dependency)
+        run: sudo apt-get update && sudo apt-get install -y python3-pyelftools
+      - name: doc-manifest + bundle-golden + pack-unit
+        run: make ci
+
+  # ---- patch series applies clean at -p1 with zero fuzz (ADR 0007) --------------
+  applies-clean:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        # base validates patches/; sev validates that patches-tee/ applies on top.
+        variant: [base, sev]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cache the pinned kernel tarball
+        uses: actions/cache@v4
+        with:
+          path: tarballs
+          key: kernel-tarball-${{ hashFiles('scripts/kernel-pin.env') }}
+      - name: Apply the series (zero fuzz)
+        run: make applies-clean VARIANT=${{ matrix.variant }} ARCH=x86_64
+
+  # ---- config-invariant: olddefconfig + required/forbidden per cell (ADR 0006) --
+  config:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86_64, aarch64]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cache the pinned kernel tarball
+        uses: actions/cache@v4
+        with:
+          path: tarballs
+          key: kernel-tarball-${{ hashFiles('scripts/kernel-pin.env') }}
+      - name: Build the pinned toolchain container
+        run: docker build -t substrate-kernel-build tools/build
+      - name: configure (olddefconfig + config-invariant), no compile
+        run: |
+          docker run --rm -v "$PWD":/work -w /work substrate-kernel-build \
+            make configured ARCH=${{ matrix.arch }} VARIANT=base
+
+  # ---- full build → the .kernel bundle ------------------------------------------
+  build:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86_64, aarch64]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cache the pinned kernel tarball
+        uses: actions/cache@v4
+        with:
+          path: tarballs
+          key: kernel-tarball-${{ hashFiles('scripts/kernel-pin.env') }}
+      - name: Build the pinned toolchain container
+        run: docker build -t substrate-kernel-build tools/build
+      - name: Build the bundle (compile + pack) in the pinned container
+        run: |
+          docker run --rm -v "$PWD":/work -w /work substrate-kernel-build \
+            make all ARCH=${{ matrix.arch }} VARIANT=base
+      - name: Stage the kernel binary for the boot-smoke lane
+        run: |
+          if [ "${{ matrix.arch }}" = "x86_64" ]; then
+            cp build/base-x86_64/linux-*/vmlinux kernel-binary
+          else
+            cp build/base-aarch64/linux-*/arch/arm64/boot/Image kernel-binary
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bundle-${{ matrix.arch }}
+          path: |
+            linux-*-base-${{ matrix.arch }}.kernel
+            kernel-binary
+          if-no-files-found: error
+
+  # ---- interim QEMU boot (testing/boot-smoke.md) --------------------------------
+  # Real boot-smoke (under substrate) is pending the cross-repo loader (ADR 0004 §5);
+  # this boots the produced kernel under QEMU and checks for the kernel banner.
+  boot-smoke:
+    needs: build
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86_64, aarch64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: bundle-${{ matrix.arch }}
+      - name: Install QEMU
+        run: sudo apt-get update && sudo apt-get install -y qemu-system-x86 qemu-system-arm
+      - name: Boot the kernel under QEMU
+        run: bash scripts/boot-smoke.sh --arch ${{ matrix.arch }} --kernel kernel-binary --timeout 240
+
+  # ---- reproducibility: byte-identical rebuild (ADR 0005) -----------------------
+  # The double-compile is slow; run on main + manual dispatch (the PR signal comes
+  # from the build lane). Cross-host (macOS) determinism is exercised separately.
+  repro-check:
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cache the pinned kernel tarball
+        uses: actions/cache@v4
+        with:
+          path: tarballs
+          key: kernel-tarball-${{ hashFiles('scripts/kernel-pin.env') }}
+      - name: Build the pinned toolchain container
+        run: docker build -t substrate-kernel-build tools/build
+      - name: Assert byte-identical rebuild
+        run: |
+          docker run --rm -v "$PWD":/work -w /work substrate-kernel-build \
+            make repro-check ARCH=x86_64 VARIANT=base

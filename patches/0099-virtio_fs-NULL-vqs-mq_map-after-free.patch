@@ -1,0 +1,28 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: substrate <substrate-kernel@loopholelabs.io>
+Date: Mon, 18 May 2026 00:00:00 +0000
+Subject: [PATCH] virtio_fs: NULL fs->vqs and fs->mq_map after kfree in setup_vqs
+
+See inline comments.
+(x86 ACPI VMGENID wiring).
+
+Signed-off-by: substrate <substrate-kernel@loopholelabs.io>
+---
+--- a/fs/fuse/virtio_fs.c
++++ b/fs/fuse/virtio_fs.c
+@@ -986,6 +986,15 @@
+ 	if (ret) {
+ 		kfree(fs->vqs);
+ 		kfree(fs->mq_map);
++		/*
++		 * substrate: the caller's `out:` label drops the
++		 * last kobj ref, which fires `virtio_fs_ktype_release`
++		 * and kfrees these fields again. Nil them so the
++		 * release path becomes a kfree(NULL) no-op instead
++		 * of a use-after-free BUG.
++		 */
++		fs->vqs = NULL;
++		fs->mq_map = NULL;
+ 	}
+ 	return ret;
+ }

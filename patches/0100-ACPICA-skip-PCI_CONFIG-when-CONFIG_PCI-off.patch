@@ -1,0 +1,35 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: substrate <substrate-kernel@loopholelabs.io>
+Date: Mon, 18 May 2026 00:00:00 +0000
+Subject: [PATCH] ACPICA: skip PCI_CONFIG default region handler when CONFIG_PCI=n
+
+See inline comments.
+(x86 ACPI VMGENID wiring).
+
+Signed-off-by: substrate <substrate-kernel@loopholelabs.io>
+---
+--- a/drivers/acpi/acpica/evhandler.c
++++ b/drivers/acpi/acpica/evhandler.c
+@@ -26,7 +26,22 @@
+ u8 acpi_gbl_default_address_spaces[ACPI_NUM_DEFAULT_SPACES] = {
+ 	ACPI_ADR_SPACE_SYSTEM_MEMORY,
+ 	ACPI_ADR_SPACE_SYSTEM_IO,
++#ifdef ACPI_PCI_CONFIGURED
++	/*
++	 * substrate: without ACPI_PCI_CONFIGURED (= CONFIG_PCI),
++	 * the PCI_CONFIG handler arm in
++	 * acpi_ev_install_space_handler is compiled out, so
++	 * include this entry only when PCI is configured.
++	 * Otherwise the install loop hits the `default:` arm and
++	 * returns AE_BAD_PARAMETER, aborting ACPI init entirely.
++	 * Pad with SYSTEM_MEMORY (duplicate is silently ignored
++	 * by the handler — AE_SAME_HANDLER / AE_ALREADY_EXISTS
++	 * are accepted by the caller).
++	 */
+ 	ACPI_ADR_SPACE_PCI_CONFIG,
++#else
++	ACPI_ADR_SPACE_SYSTEM_MEMORY,
++#endif
+ 	ACPI_ADR_SPACE_DATA_TABLE
+ };
+ 

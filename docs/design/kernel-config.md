@@ -1,0 +1,84 @@
+# Design: the kernel config
+
+The curated, monolithic, virtio-only `.config` per (arch, variant)
+([ADR 0006](../adr/0006-kernel-config-strategy.md)). This doc records *what* is
+enabled/disabled and *why*, and the deltas between cells. It is the place a
+reviewer confirms the image is the smallest thing that supports substrate's feature
+contract.
+
+## Background
+
+The per-arch configs (`config-*_{x86_64,aarch64,riscv64}`, plus
+`-sev`/`-tdx`/`-windows` variants): monolithic (`CONFIG_MODULES=n`), the virtio
+device set (`VIRTIO_{BLK,NET,CONSOLE,VSOCKETS,MMIO,FS,RTC}`), `OVERLAY_FS`,
+`FUSE_FS` + `FUSE_DAX`, `TMPFS`/`DEVTMPFS`, hotplug CPU, `NR_CPUS` bounded, and the
+broad set of disabled subsystems (audit, USB, sound, most PCI). We carry the
+reference's full config set (x86_64 / aarch64 / riscv64 base + the x86-only sev /
+tdx / windows variants, [ADR 0002](../adr/0002-target-architectures.md)) and drop
+only GPU and CAN ([design/patches.md](patches.md)), with substrate-native naming
+throughout ([ADR 0008](../adr/0008-kernel-capability-surface-vs-vmm-scope.md)).
+
+## Subtle details & gotchas
+
+| Detail | Convention | Our handling | Gate |
+|---|---|---|---|
+| **`olddefconfig` resolves changed deps silently** — a required option can vanish at a version bump | runs `olddefconfig` | run it, then assert the required/forbidden set per cell | config-invariant gate |
+| **`NR_CPUS` left high = image bloat** | bounded (left high by default) | set to substrate's max vCPU count, with the number cited | config-invariant gate (exact value) |
+| **PCI policy** — disabling PCI entirely breaks some x86 ACPI paths | PCI disabled; ACPI patched to cope ([patches.md](patches.md) ACPI fixes) | match: PCI off where possible + the x86 ACPI hypervisor patches; document the coupling | boot-smoke (x86) |
+| **DRM/framebuffer pulls in a large subsystem** | GPU configs enabled | **disabled** — GPU is cut (CLAUDE.md §1) | config-invariant gate (forbidden set) |
+| **Reproducibility-hostile config** — embedded build IDs/timestamps | (relies on `KBUILD_BUILD_*`) | also disable embedded IDs/timestamps in config where possible ([ADR 0005](../adr/0005-build-environment-and-reproducibility.md)) | `make repro-check` |
+| **TEE config must not leak into base** | separate `-sev`/`-tdx` configs | base configs carry **no** TEE options; sev/tdx are separate cells ([ADR 0009](../adr/0009-confidential-compute-variants.md)) | config-invariant (base forbids TEE) |
+
+## Our design
+
+**Enabled (the substrate device set + supporting subsystems):**
+
+- **Virtio core + transport:** `VIRTIO`, `VIRTIO_MMIO` (the transport substrate's
+  `mmio` crate drives).
+- **Devices substrate wires:** `VIRTIO_BLK`, `VIRTIO_NET`, `VIRTIO_VSOCKETS`,
+  `VIRTIO_CONSOLE`, `HW_RANDOM_VIRTIO` (rng). TSI is enabled via its patch's config
+  symbol ([patches.md](patches.md)).
+- **Optional substrate capabilities:** `FUSE_FS` + `VIRTIO_FS` + `FUSE_DAX` (for
+  `--volume` mounts, never rootfs — substrate architecture.md §1), `VIRTIO_RTC`
+  (timekeeping). These are part of the kernel's fixed feature set; there is no
+  header capability advertisement ([ADR 0008](../adr/0008-kernel-capability-surface-vs-vmm-scope.md)).
+- **Filesystems / boot essentials:** `OVERLAY_FS`, `TMPFS`, `DEVTMPFS` (+ auto
+  mount), `EXT4_FS` (the production rootfs is a sparse ext4 disk — substrate
+  architecture.md §1). `BLK_DEV_INITRD` is **unset** in base, matching the
+  base config.
+- **CPU:** `HOTPLUG_CPU`; `NR_CPUS` bounded to substrate's max (value cited in the
+  config comment).
+
+**Disabled (microVM-irrelevant or cut):**
+
+- **`MODULES=n`** — monolithic image.
+- **GPU/DRM/framebuffer** — cut (CLAUDE.md §1).
+- **USB, sound, most PCI, audit, legacy input** — a microVM never sees these.
+- **GPU/CAN** — GPU is cut (CLAUDE.md §1); the virtio-CAN driver is dropped (no
+  substrate consumer, [design/patches.md](patches.md)).
+
+**Per-cell deltas** (documented so duplication stays legible —
+[ADR 0006](../adr/0006-kernel-config-strategy.md) §5):
+
+- **x86_64 vs aarch64 vs riscv64:** arch core options; the x86 ACPI options
+  (`CONFIG_PVH=y` is carried as a kernel capability, but the boot path is the 64-bit
+  `boot_params` entry, not PVH — [ADR 0004](../adr/0004-boot-contract-with-substrate.md));
+  the aarch64 timer/GIC options. TSO/memory-model options are aarch64-only
+  ([patches.md](patches.md)).
+- **base vs sev/tdx/windows (x86 only):** the TEE cells add the confidential-compute
+  options (memory-encryption, restricted-DMA, the secret-retrieval path) and base
+  cells **forbid** them ([ADR 0009](../adr/0009-confidential-compute-variants.md));
+  the windows cell adds Hyper-V enlightenments (`CONFIG_HYPERV*`) and is packed at
+  4 KiB ([ADR 0002](../adr/0002-target-architectures.md)).
+
+The authoritative enabled/forbidden sets per cell live as the config-invariant
+gate's data ([testing/strategy.md](../testing/strategy.md)); this doc is the prose
+rationale.
+
+## Verification
+
+The config-invariant gate asserts the required-present / forbidden-absent set per
+(arch, variant) after `olddefconfig`; boot-smoke proves the enabled set actually
+boots a guest and drives the wired devices; `make repro-check` proves the config
+(plus fixed metadata) yields byte-identical images
+([testing/strategy.md](../testing/strategy.md)).
