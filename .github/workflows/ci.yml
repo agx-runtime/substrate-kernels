@@ -31,7 +31,7 @@ jobs:
   static:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Install pyelftools (the packer's ELF dependency)
         run: sudo apt-get update && sudo apt-get install -y python3-pyelftools
       - name: doc-manifest + bundle-golden + pack-unit
@@ -46,9 +46,9 @@ jobs:
         # base validates patches/; sev validates that patches-tee/ applies on top.
         variant: [base, sev]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Cache the pinned kernel tarball
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: tarballs
           key: kernel-tarball-${{ hashFiles('scripts/kernel-pin.env') }}
@@ -63,9 +63,9 @@ jobs:
       matrix:
         arch: [x86_64, aarch64]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Cache the pinned kernel tarball
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: tarballs
           key: kernel-tarball-${{ hashFiles('scripts/kernel-pin.env') }}
@@ -84,9 +84,9 @@ jobs:
       matrix:
         arch: [x86_64, aarch64]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Cache the pinned kernel tarball
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: tarballs
           key: kernel-tarball-${{ hashFiles('scripts/kernel-pin.env') }}
@@ -103,7 +103,7 @@ jobs:
           else
             cp build/base-aarch64/linux-*/arch/arm64/boot/Image kernel-binary
           fi
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: bundle-${{ matrix.arch }}
           path: |
@@ -122,8 +122,8 @@ jobs:
       matrix:
         arch: [x86_64, aarch64]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v8
         with:
           name: bundle-${{ matrix.arch }}
       - name: Install QEMU
@@ -138,9 +138,9 @@ jobs:
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Cache the pinned kernel tarball
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: tarballs
           key: kernel-tarball-${{ hashFiles('scripts/kernel-pin.env') }}

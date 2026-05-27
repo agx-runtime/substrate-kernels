@@ -35,7 +35,7 @@ jobs:
       version: ${{ steps.pin.outputs.version }}
       tag: ${{ steps.pin.outputs.tag }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - id: pin
         run: |
           set -euo pipefail
@@ -65,9 +65,9 @@ jobs:
       matrix:
         arch: [x86_64, aarch64]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Cache the pinned kernel tarball
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: tarballs
           key: kernel-tarball-${{ hashFiles('scripts/kernel-pin.env') }}
@@ -77,7 +77,7 @@ jobs:
         run: |
           docker run --rm -v "$PWD":/work -w /work substrate-kernel-build \
             make all ARCH=${{ matrix.arch }} VARIANT=base
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: bundle-${{ matrix.arch }}
           path: linux-${{ needs.prepare.outputs.version }}-base-${{ matrix.arch }}.kernel
@@ -94,8 +94,8 @@ jobs:
       # Proxy for "are the Cloudflare R2 credentials configured?" — gates the R2 steps.
       CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v8
         with:
           pattern: bundle-*
           merge-multiple: true
@@ -130,21 +130,21 @@ jobs:
       # ---- mirror to Cloudflare R2 (skipped if secrets are unset) ---------------
       - name: Upload x86_64 bundle to R2
         if: ${{ env.CF_TOKEN != '' }}
-        uses: cloudflare/wrangler-action@v3
+        uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           command: r2 object put "${{ vars.R2_BUCKET }}/linux-${{ env.VERSION }}-base-x86_64.kernel" --file=linux-${{ env.VERSION }}-base-x86_64.kernel --remote
       - name: Upload aarch64 bundle to R2
         if: ${{ env.CF_TOKEN != '' }}
-        uses: cloudflare/wrangler-action@v3
+        uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           command: r2 object put "${{ vars.R2_BUCKET }}/linux-${{ env.VERSION }}-base-aarch64.kernel" --file=linux-${{ env.VERSION }}-base-aarch64.kernel --remote
       - name: Upload SHA256SUMS to R2
         if: ${{ env.CF_TOKEN != '' }}
-        uses: cloudflare/wrangler-action@v3
+        uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
