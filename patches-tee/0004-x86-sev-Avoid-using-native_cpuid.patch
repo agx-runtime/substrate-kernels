@@ -16,7 +16,7 @@ Signed-off-by: Sergio Lopez <slp@redhat.com>
  1 file changed, 3 insertions(+), 23 deletions(-)
 
 diff --git a/arch/x86/mm/mem_encrypt_identity.c b/arch/x86/mm/mem_encrypt_identity.c
-index b922b9fea6b6..c0de732b0121 100644
+index b922b9fea..c0de732b0 100644
 --- a/arch/x86/mm/mem_encrypt_identity.c
 +++ b/arch/x86/mm/mem_encrypt_identity.c
 @@ -495,37 +495,17 @@ void __head sme_enable(struct boot_params *bp)

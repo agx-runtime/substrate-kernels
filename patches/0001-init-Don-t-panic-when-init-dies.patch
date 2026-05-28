@@ -16,7 +16,7 @@ Signed-off-by: Sergio Lopez <slp@redhat.com>
  2 files changed, 8 insertions(+)
 
 diff --git a/kernel/exit.c b/kernel/exit.c
-index d465b36bcc86..f5fd756b9097 100644
+index b91124b2d..10bc26857 100644
 --- a/kernel/exit.c
 +++ b/kernel/exit.c
 @@ -69,6 +69,8 @@
@@ -28,7 +28,7 @@ index d465b36bcc86..f5fd756b9097 100644
  #include <linux/uaccess.h>
  
  #include <uapi/linux/wait.h>
-@@ -905,8 +907,12 @@ void __noreturn do_exit(long code)
+@@ -906,8 +908,12 @@ void __noreturn do_exit(long code)
  		 * immediately to get a useable coredump.
  		 */
  		if (unlikely(is_global_init(tsk)))
@@ -42,7 +42,7 @@ index d465b36bcc86..f5fd756b9097 100644
  #ifdef CONFIG_POSIX_TIMERS
  		hrtimer_cancel(&tsk->signal->real_timer);
 diff --git a/kernel/reboot.c b/kernel/reboot.c
-index d6ee090eda94..f6947c5bd671 100644
+index d6ee090ed..b1bd64580 100644
 --- a/kernel/reboot.c
 +++ b/kernel/reboot.c
 @@ -278,10 +278,12 @@ void kernel_restart(char *cmd)

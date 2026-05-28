@@ -12,7 +12,7 @@ Signed-off-by: Bobby Eshleman <bobby.eshleman@bytedance.com>
  1 file changed, 26 insertions(+), 7 deletions(-)
 
 diff --git a/net/vmw_vsock/af_vsock.c b/net/vmw_vsock/af_vsock.c
-index c15d9a6f8b89..30517b362fcc 100644
+index 9046ea82a..6d3e95d94 100644
 --- a/net/vmw_vsock/af_vsock.c
 +++ b/net/vmw_vsock/af_vsock.c
 @@ -235,11 +235,12 @@ static void __vsock_remove_connected(struct vsock_sock *vsk)

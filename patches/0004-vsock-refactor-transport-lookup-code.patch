@@ -14,7 +14,7 @@ Signed-off-by: Bobby Eshleman <bobby.eshleman@bytedance.com>
  1 file changed, 18 insertions(+), 7 deletions(-)
 
 diff --git a/net/vmw_vsock/af_vsock.c b/net/vmw_vsock/af_vsock.c
-index fccb4761b8af..4a8f62e7520d 100644
+index 460c9893e..8049e3b4f 100644
 --- a/net/vmw_vsock/af_vsock.c
 +++ b/net/vmw_vsock/af_vsock.c
 @@ -432,6 +432,22 @@ static void vsock_deassign_transport(struct vsock_sock *vsk)

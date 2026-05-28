@@ -8,9 +8,11 @@ See inline comments.
 
 Signed-off-by: substrate <substrate-kernel@loopholelabs.io>
 ---
+diff --git a/arch/x86/kernel/acpi/boot.c b/arch/x86/kernel/acpi/boot.c
+index a1acff778..be207cd5d 100644
 --- a/arch/x86/kernel/acpi/boot.c
 +++ b/arch/x86/kernel/acpi/boot.c
-@@ -1409,10 +1409,24 @@
+@@ -1409,10 +1409,24 @@ void __init acpi_generic_reduced_hw_init(void)
  	/*
  	 * Override x86_init functions and bypass legacy PIC in
  	 * hardware reduced ACPI mode.
@@ -37,3 +39,4 @@ Signed-off-by: substrate <substrate-kernel@loopholelabs.io>
  }
  
  static void __init acpi_reduced_hw_init(void)
+

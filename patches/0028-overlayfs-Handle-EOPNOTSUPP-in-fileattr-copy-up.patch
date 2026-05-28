@@ -26,17 +26,16 @@ Signed-off-by: smolvm <smolvm@users.noreply.github.com>
  1 file changed, 1 insertion(+), 1 deletion(-)
 
 diff --git a/fs/overlayfs/inode.c b/fs/overlayfs/inode.c
-index 4e2cfb05b767..5e1867a0c213 100644
+index baa54c718..ee70e63b7 100644
 --- a/fs/overlayfs/inode.c
 +++ b/fs/overlayfs/inode.c
 @@ -721,7 +721,7 @@ int ovl_real_fileattr_get(const struct path *realpath, struct fileattr *fa)
  		return err;
-
+ 
  	err = vfs_fileattr_get(realpath->dentry, fa);
 -	if (err == -ENOIOCTLCMD)
 +	if (err == -ENOIOCTLCMD || err == -EOPNOTSUPP)
  		err = -ENOTTY;
  	return err;
  }
---
-2.52.0
+

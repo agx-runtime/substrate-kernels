@@ -8,9 +8,11 @@ See inline comments.
 
 Signed-off-by: substrate <substrate-kernel@loopholelabs.io>
 ---
+diff --git a/drivers/acpi/acpica/evhandler.c b/drivers/acpi/acpica/evhandler.c
+index 1c8cb6d92..935708ce2 100644
 --- a/drivers/acpi/acpica/evhandler.c
 +++ b/drivers/acpi/acpica/evhandler.c
-@@ -26,7 +26,22 @@
+@@ -26,7 +26,22 @@ acpi_ev_install_handler(acpi_handle obj_handle,
  u8 acpi_gbl_default_address_spaces[ACPI_NUM_DEFAULT_SPACES] = {
  	ACPI_ADR_SPACE_SYSTEM_MEMORY,
  	ACPI_ADR_SPACE_SYSTEM_IO,
@@ -33,3 +35,4 @@ Signed-off-by: substrate <substrate-kernel@loopholelabs.io>
  	ACPI_ADR_SPACE_DATA_TABLE
  };
  
+

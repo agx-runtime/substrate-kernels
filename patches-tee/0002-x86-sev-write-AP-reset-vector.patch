@@ -12,7 +12,7 @@ Signed-off-by: Sergio Lopez <slp@redhat.com>
  1 file changed, 24 insertions(+), 1 deletion(-)
 
 diff --git a/arch/x86/coco/sev/core.c b/arch/x86/coco/sev/core.c
-index 2be730765f83..aff0f627c3bd 100644
+index 2be730765..66dc57f48 100644
 --- a/arch/x86/coco/sev/core.c
 +++ b/arch/x86/coco/sev/core.c
 @@ -1273,6 +1273,29 @@ void __init snp_set_wakeup_secondary_cpu(void)

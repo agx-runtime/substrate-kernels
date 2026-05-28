@@ -8,9 +8,11 @@ See inline comments.
 
 Signed-off-by: substrate <substrate-kernel@loopholelabs.io>
 ---
+diff --git a/fs/fuse/virtio_fs.c b/fs/fuse/virtio_fs.c
+index c81f7b888..199ed474d 100644
 --- a/fs/fuse/virtio_fs.c
 +++ b/fs/fuse/virtio_fs.c
-@@ -986,6 +986,15 @@
+@@ -986,6 +986,15 @@ static int virtio_fs_setup_vqs(struct virtio_device *vdev,
  	if (ret) {
  		kfree(fs->vqs);
  		kfree(fs->mq_map);
@@ -26,3 +28,4 @@ Signed-off-by: substrate <substrate-kernel@loopholelabs.io>
  	}
  	return ret;
  }
+

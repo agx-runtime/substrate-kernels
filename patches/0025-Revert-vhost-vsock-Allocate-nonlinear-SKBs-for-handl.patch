@@ -11,7 +11,7 @@ This reverts commit 65e808a6023f883f298db734444a9c38e45af740.
  2 files changed, 8 insertions(+), 32 deletions(-)
 
 diff --git a/drivers/vhost/vsock.c b/drivers/vhost/vsock.c
-index deaadc2503a2..ad89ee3676db 100644
+index deaadc250..ad89ee367 100644
 --- a/drivers/vhost/vsock.c
 +++ b/drivers/vhost/vsock.c
 @@ -352,7 +352,7 @@ vhost_vsock_alloc_skb(struct vhost_virtqueue *vq,
@@ -37,7 +37,7 @@ index deaadc2503a2..ad89ee3676db 100644
  		return NULL;
  	}
 diff --git a/include/linux/virtio_vsock.h b/include/linux/virtio_vsock.h
-index e3d7afa29894..1ff7389ed244 100644
+index e3d7afa29..1ff7389ed 100644
 --- a/include/linux/virtio_vsock.h
 +++ b/include/linux/virtio_vsock.h
 @@ -49,48 +49,22 @@ static inline void virtio_vsock_skb_clear_tap_delivered(struct sk_buff *skb)

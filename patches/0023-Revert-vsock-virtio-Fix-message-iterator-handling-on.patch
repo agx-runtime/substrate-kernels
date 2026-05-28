@@ -10,7 +10,7 @@ This reverts commit e6cee5d4a122ca9d6b7bb8fa09e498c60b9f208c.
  1 file changed, 3 insertions(+), 5 deletions(-)
 
 diff --git a/net/vmw_vsock/virtio_transport_common.c b/net/vmw_vsock/virtio_transport_common.c
-index b3ee9ce90b5d..f274cde784f7 100644
+index 5fcb38a6d..712ae1fc6 100644
 --- a/net/vmw_vsock/virtio_transport_common.c
 +++ b/net/vmw_vsock/virtio_transport_common.c
 @@ -106,15 +106,13 @@ static int virtio_transport_fill_skb(struct sk_buff *skb,

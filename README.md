@@ -76,8 +76,8 @@ Release artifacts are the `.kernel` bundles plus a `SHA256SUMS` file, published 
 **GitHub Releases** and mirrored to **Cloudflare R2**, served publicly at
 `https://kernels.substrate.loopholelabs.io/`.
 
-- **Version** comes from the pin (`scripts/kernel-pin.env`, e.g. `6.12.87`). The
-  release tag is `v<version>` (e.g. `v6.12.87`), or `v<version>-r<N>` when
+- **Version** comes from the pin (`scripts/kernel-pin.env`, e.g. `6.12.91`). The
+  release tag is `v<version>` (e.g. `v6.12.91`), or `v<version>-r<N>` when
   re-releasing the same kernel after a patch/config change without a pin bump.
 - **To cut a release:** bump the pin if needed (and re-validate the series + configs
   + boot), then either push a `v*` tag or run the **Release** workflow manually

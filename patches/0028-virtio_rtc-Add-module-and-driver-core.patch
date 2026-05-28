@@ -33,7 +33,7 @@ Signed-off-by: Michael S. Tsirkin <mst@redhat.com>
  create mode 100644 include/uapi/linux/virtio_rtc.h
 
 diff --git a/drivers/virtio/Kconfig b/drivers/virtio/Kconfig
-index 42a48ac763ee..fd6b826af19a 100644
+index 42a48ac76..fd6b826af 100644
 --- a/drivers/virtio/Kconfig
 +++ b/drivers/virtio/Kconfig
 @@ -188,4 +188,17 @@ config VIRTIO_DEBUG
@@ -55,7 +55,7 @@ index 42a48ac763ee..fd6b826af19a 100644
 +
  endif # VIRTIO_MENU
 diff --git a/drivers/virtio/Makefile b/drivers/virtio/Makefile
-index 58b2b0489fc9..c41c4c0f9264 100644
+index 58b2b0489..c41c4c0f9 100644
 --- a/drivers/virtio/Makefile
 +++ b/drivers/virtio/Makefile
 @@ -14,3 +14,5 @@ obj-$(CONFIG_VIRTIO_VDPA) += virtio_vdpa.o
@@ -66,7 +66,7 @@ index 58b2b0489fc9..c41c4c0f9264 100644
 +virtio_rtc-y := virtio_rtc_driver.o
 diff --git a/drivers/virtio/virtio_rtc_driver.c b/drivers/virtio/virtio_rtc_driver.c
 new file mode 100644
-index 000000000000..c87ee4e63424
+index 000000000..c87ee4e63
 --- /dev/null
 +++ b/drivers/virtio/virtio_rtc_driver.c
 @@ -0,0 +1,786 @@
@@ -858,7 +858,7 @@ index 000000000000..c87ee4e63424
 +MODULE_LICENSE("GPL");
 diff --git a/drivers/virtio/virtio_rtc_internal.h b/drivers/virtio/virtio_rtc_internal.h
 new file mode 100644
-index 000000000000..9c249c15b68f
+index 000000000..9c249c15b
 --- /dev/null
 +++ b/drivers/virtio/virtio_rtc_internal.h
 @@ -0,0 +1,24 @@
@@ -888,7 +888,7 @@ index 000000000000..9c249c15b68f
 +#endif /* _VIRTIO_RTC_INTERNAL_H_ */
 diff --git a/include/uapi/linux/virtio_rtc.h b/include/uapi/linux/virtio_rtc.h
 new file mode 100644
-index 000000000000..6b3af4e9bbfb
+index 000000000..6b3af4e9b
 --- /dev/null
 +++ b/include/uapi/linux/virtio_rtc.h
 @@ -0,0 +1,151 @@

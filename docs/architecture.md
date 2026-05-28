@@ -104,7 +104,7 @@ live.
 ## 4. The architecture × variant matrix
 
 The artifact name is `linux-<version>-<variant>-<arch>.kernel` (e.g.
-`linux-6.12.87-base-aarch64.kernel`).
+`linux-6.12.91-base-aarch64.kernel`).
 
 | | x86_64 | aarch64 | riscv64 |
 |---|---|---|---|

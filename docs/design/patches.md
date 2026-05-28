@@ -47,6 +47,17 @@ ACPI hypervisor fixes; and the SEV/TDX series (quarantined,
 - **Provenance:** backport (the upstream datagram series + the specific reverts);
   cite each at re-derivation. **Audit obligation:** confirm the reverts are still
   needed against our pin (a revert that the pin already lacks is dropped).
+- **Audit (6.12.91 pin):** upstream reworked the RX-capture path — it removed
+  `virtio_transport_copy_nonlinear_skb()` and made `virtio_transport_build_skb()`
+  copy the payload unconditionally via `skb_copy_datagram_iter()`, added
+  `VIRTIO_VSOCK_SKB_CB(skb)->offset` accounting to the stream dequeue, and reordered
+  the `af_vsock.c` buffer-size clamp (min before max). The datagram-send patch was
+  re-anchored (its `virtio_transport_sock_alloc_send_skb()` helper had used the
+  now-deleted `copy_nonlinear_skb` as context); the change is otherwise identical.
+  The reverts were **kept**: each still removes real upstream code (so none is
+  moot), the linear-SKB requirement of the vsock path is unchanged, and the rework
+  lives in functions orthogonal to the revert targets (`fill_skb`/`alloc_skb` TX,
+  `vhost_vsock_alloc_skb` RX, the seqpacket/credit logic).
 
 ### TSI (transparent socket interception)
 - **What:** address families that route guest `AF_INET`/`AF_INET6`/`AF_UNIX`

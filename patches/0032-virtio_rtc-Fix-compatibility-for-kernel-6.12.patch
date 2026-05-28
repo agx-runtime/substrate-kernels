@@ -17,7 +17,7 @@ Signed-off-by: Dorinda Bassey <dbassey@redhat.com>
  1 file changed, 2 insertions(+), 2 deletions(-)
 
 diff --git a/drivers/virtio/virtio_rtc_driver.c b/drivers/virtio/virtio_rtc_driver.c
-index a57d5e06e19d..bc303c32dab3 100644
+index a57d5e06e..bc303c32d 100644
 --- a/drivers/virtio/virtio_rtc_driver.c
 +++ b/drivers/virtio/virtio_rtc_driver.c
 @@ -575,7 +575,7 @@ static int viortc_msg_xfer(struct viortc_vq *vq, struct viortc_msg *msg,
