@@ -15,6 +15,9 @@
 name = "substrate-kernel-download-proxy"
 main = "src/index.ts"
 compatibility_date = "2025-04-01"
+# Disable the *.workers.dev URL — the Worker is only reachable via the
+# custom_domain routes below. No leaky default hostname.
+workers_dev = false
 
 # The R2 bucket that release.yml uploads `.kernel` bundles + SHA256SUMS to.
 # Bound directly — the Worker never speaks S3.
@@ -28,14 +31,33 @@ bucket_name = "substrate-kernels"
 binding = "EVENTS_QUEUE"
 queue = "analytics-events"
 
-# Both public hostnames. Direct R2 S3 URLs remain accessible as a
-# break-glass for ops; clients use these.
-routes = [
-  { pattern = "kernels.substrate.loopholelabs.io/*", custom_domain = true },
-  { pattern = "kernels.agx.so/*", custom_domain = true },
-]
+# Both public hostnames. `custom_domain = true` captures ALL paths of the
+# subdomain automatically (no `/*` glob — that's the route shape, not the
+# custom-domain shape; see CF docs on Workers routing). Cloudflare creates
+# the DNS + SSL records on first deploy. Direct R2 S3 URLs remain
+# accessible as a break-glass for ops; clients use these.
+[[routes]]
+pattern = "kernels.substrate.loopholelabs.io"
+custom_domain = true
 
-# Observable logs in the Cloudflare dashboard for the lifetime of the
-# Worker. Cheap; matches the analytics workers' setup.
+[[routes]]
+pattern = "kernels.agx.so"
+custom_domain = true
+
+# Workers Logs + traces. Pattern mirrors agx/cloud/local-certificates: the
+# top-level [observability] block is the rollup; logs + traces are enabled
+# per-subblock with persistence + invocation logging.
 [observability]
+enabled = false
+head_sampling_rate = 1
+
+[observability.logs]
 enabled = true
+head_sampling_rate = 1
+persist = true
+invocation_logs = true
+
+[observability.traces]
+enabled = true
+persist = true
+head_sampling_rate = 1
