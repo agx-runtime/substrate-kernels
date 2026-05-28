@@ -104,10 +104,6 @@ function renderHeader(): string {
 
 function renderHero(): string {
   return `<section class="hero">
-    <div class="backrow">
-      ${ICONS.arrowLeft}
-      <span>substrate / kernels</span>
-    </div>
     <div class="titlerow">
       <div class="titleL">
         <h1>Kernels</h1>
@@ -233,17 +229,24 @@ function renderArtifactRow(
   const searchKey = `${a.version} ${a.variant} ${a.arch} ${shortHash(a.etag)} ${a.etag.replace(/"/g, '')}`.toLowerCase();
   const sortKey = `${a.version}|${a.arch}|${a.uploaded.getTime()}`;
   const sumsHref = v.sums ? `/${v.sums.key}` : null;
-  const newPill = v.isNewest
-    ? `<span class="newpill">NEW</span>`
-    : '';
+  const newPill = v.isNewest ? `<span class="newpill">NEW</span>` : '';
   const verCls = v.isNewest ? 'mono active' : 'mono';
-  return `<a class="trow tartifact" href="/${esc(a.key)}" download
+  const dlHref = `/${esc(a.key)}`;
+  // The outer row is a <div> so we can have BOTH the per-row sha link
+  // and the per-row download link inside it (nested <a> tags are illegal
+  // in HTML and browsers auto-close the outer one — that's what caused
+  // the c-sha and c-dl cells to render as orphaned blocks below the
+  // row). A click anywhere on the row triggers the .kernel download
+  // via the inline JS handler; the .sumslink and .dlbtn anchors handle
+  // their own clicks and stop propagation.
+  return `<div class="trow tartifact" data-dl="${dlHref}"
     data-version="${esc(a.version)}"
     data-line="${esc(line.line)}"
     data-arch="${esc(a.arch)}"
     data-variant="${esc(a.variant)}"
     data-search="${esc(searchKey)}"
-    data-sort="${esc(sortKey)}">
+    data-sort="${esc(sortKey)}"
+    role="link" tabindex="0">
     <span class="c-version">
       ${ICONS.fileArchive}
       <span class="${verCls}">linux-${esc(a.version)}</span>
@@ -255,13 +258,11 @@ function renderArtifactRow(
     <span class="c-built mono">${esc(humanDate(a.uploaded))}</span>
     <span class="c-sha">${
       sumsHref
-        ? `<a class="sumslink mono" href="${esc(sumsHref)}" title="Download SHA256SUMS for this version" download onclick="event.stopPropagation()">${esc(shortHash(a.etag))}</a>`
+        ? `<a class="sumslink mono" href="${esc(sumsHref)}" title="Download SHA256SUMS for this version" download>${esc(shortHash(a.etag))}</a>`
         : `<span class="mono muted">${esc(shortHash(a.etag))}</span>`
     }</span>
-    <span class="c-dl">
-      <span class="dlbtn">${ICONS.download}<span>.kernel</span></span>
-    </span>
-  </a>`;
+    <span class="c-dl"><a class="dlbtn" href="${dlHref}" download>${ICONS.download}<span>.kernel</span></a></span>
+  </div>`;
 }
 
 function renderNotes(): string {
@@ -475,8 +476,10 @@ h1 { font-size: 36px; font-weight: 600; margin: 4px 0 0; letter-spacing: -0.5px;
 .sumslink { display: inline-block; font-size: 12px; color: var(--muted); border-bottom: 1px dashed transparent; transition: color .15s, border-color .15s; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 .sumslink:hover { color: var(--fg); border-bottom-color: var(--ring); }
 .c-dl { justify-self: end; }
-.dlbtn { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border: 1px solid var(--border); font-family: var(--mono); font-size: 11px; color: var(--fg); transition: background .15s, border-color .15s; }
+.dlbtn { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border: 1px solid var(--border); font-family: var(--mono); font-size: 11px; color: var(--fg); transition: background .15s, border-color .15s, color .15s; text-decoration: none; }
+.dlbtn:hover { background: var(--fg); color: var(--bg); border-color: var(--fg); }
 .trow.tartifact:hover .dlbtn { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+.trow.tartifact:focus { outline: 1px solid var(--ring); outline-offset: -1px; }
 .trow.hidden { display: none; }
 
 /* ---- Notes ---- */
@@ -546,6 +549,33 @@ const PAGE_JS = `
   var sortV = document.getElementById("sort-v");
 
   var state = { q: "", arch: "", sort: "newest" };
+
+  // Row-click: trigger the row's primary download. The inner <a> tags
+  // (.sumslink, .dlbtn) handle their own clicks — closest(".trow") will
+  // still match, so guard against re-firing by checking the original
+  // target.
+  tbl.addEventListener("click", function (e) {
+    var t = e.target;
+    if (!(t instanceof Element)) return;
+    if (t.closest("a")) return; // an inner <a> handled it
+    var row = t.closest(".tartifact");
+    if (!row) return;
+    var href = row.getAttribute("data-dl");
+    if (href) window.location.href = href;
+  });
+  // Keyboard activation for the role=link rows.
+  tbl.addEventListener("keydown", function (e) {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    var t = e.target;
+    if (!(t instanceof Element)) return;
+    var row = t.closest(".tartifact");
+    if (!row || t !== row) return;
+    var href = row.getAttribute("data-dl");
+    if (href) {
+      e.preventDefault();
+      window.location.href = href;
+    }
+  });
 
   function rows() {
     return Array.prototype.slice.call(tbl.querySelectorAll(".tartifact"));
