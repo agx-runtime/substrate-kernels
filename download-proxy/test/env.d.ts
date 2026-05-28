@@ -13,6 +13,7 @@ declare global {
   namespace Cloudflare {
     interface Env extends ProxyEnv {
       KERNELS: R2Bucket;
+      DOWNLOAD_RATE_LIMITER_IP: RateLimit;
     }
   }
 }

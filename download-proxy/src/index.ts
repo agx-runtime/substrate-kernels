@@ -19,11 +19,24 @@
 
 import { recordDownload } from './analytics.ts';
 import { serveFromR2 } from './r2.ts';
+import { checkRateLimit } from './ratelimit.ts';
 import { parsePath } from './router.ts';
 import type { Env } from './types.ts';
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    // Per-IP rate limit, BEFORE routing — scan traffic on garbage paths
+    // also counts against the bucket so a probe-and-back-off attack can't
+    // bypass the limiter by varying the path.
+    const ip = request.headers.get('CF-Connecting-IP');
+    const limit = await checkRateLimit(env, ip);
+    if (!limit.ok) {
+      return new Response('Rate limited', {
+        status: limit.status,
+        headers: { 'Retry-After': String(limit.retryAfter) },
+      });
+    }
+
     const url = new URL(request.url);
     const parsed = parsePath(url.pathname);
     if (parsed === null) return new Response('Not found', { status: 404 });

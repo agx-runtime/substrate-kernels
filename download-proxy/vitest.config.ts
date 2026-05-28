@@ -24,6 +24,12 @@ export default defineConfig({
         // Real R2 binding so the integration test exercises the actual
         // get / head / range code path; seeded per-test via env.KERNELS.put.
         r2Buckets: ['KERNELS'],
+        // Real per-IP rate limit binding. A generous limit so the existing
+        // integration cases never hit it; a dedicated case opts into a
+        // 1/min limit by overriding the binding via testEnv.
+        ratelimits: {
+          DOWNLOAD_RATE_LIMITER_IP: { simple: { limit: 10_000, period: 60 } },
+        },
         // No queueProducers here — tests override env.EVENTS_QUEUE with a
         // stub at the call site so they can assert send() shapes directly.
       },

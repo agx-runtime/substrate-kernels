@@ -36,6 +36,7 @@ the producer is hand-rolled per that spec in
 | **`.kernel` content is stable per pinned version** ([reproducibility.md](reproducibility.md)) so it caches forever; `SHA256SUMS` can change within a version on re-release | one cache policy for all | `Cache-Control: public, max-age=31536000, immutable` for `.kernel`; `public, max-age=300` for `SHA256SUMS` | integration test asserts `Cache-Control` contains `immutable` for kernel bundles |
 | **Path-shape validation must reject everything that isn't a known artifact** — defense in depth against R2-key probing | tolerant glob over the bucket | pure `parsePath` with two anchored regexes; unknown shapes return 404 BEFORE any R2 read | `test/router.test.ts` covers traversal, query-string bait, wrong extension, casing |
 | **Shape drift between `src/analytics.ts` and `analytics/docs/spec/queue-protocol.md`** — no compile-time link between the two repos | trust the doc and hope | `test/integration.test.ts` asserts every spec-required field on the emitted `QueueEvent` (source, event_name, the dual-ID nulls, the ip_* enrichment surface, the properties shape) — a spec change that breaks the consumer fails this test before deploy | the integration test |
+| **Public + unauthenticated** — one chatty IP can chew CPU/request quota and bloat the analytics queue (one event per full GET) | no limiter | per-IP rate limit via the Workers Rate Limiting binding (`DOWNLOAD_RATE_LIMITER_IP`, 60 req/min, keyed on `CF-Connecting-IP`). Checked BEFORE routing so scan traffic on garbage paths also counts. `429` + `Retry-After: 60` on deny; no analytics emit on a rate-limited request | `test/integration.test.ts` "returns 429 + Retry-After when the per-IP rate limit denies" |
 
 ## Our design
 
@@ -55,6 +56,17 @@ Worker responds 404 with no analytics emit.
 `sev`, `tdx`); `<arch>` is `[a-z0-9_]+` (`x86_64`, `aarch64`, `riscv64`).
 Path length is bounded; anything over the cap returns null without regex
 work.
+
+### Rate limit — per-IP, before routing
+
+`download-proxy/src/ratelimit.ts` calls the Workers Rate Limiting binding
+keyed on `CF-Connecting-IP`. Default: **60 requests / minute / IP** (10
+kernel files worth of activity per minute is generous for any real use;
+abusive volume from a single source is bounded). Applied to every
+request — so a probe-and-back-off attack varying paths still counts
+against the bucket. On deny: `429` + `Retry-After: 60`, no R2 read, no
+analytics emit. Falls open if `CF-Connecting-IP` is missing (production
+edge always sets it; `wrangler dev` sometimes doesn't).
 
 ### Serving — R2 binding + range
 
@@ -99,9 +111,12 @@ immediately; failures are logged to `console.error` and swallowed.
 - `[[r2_buckets]]` `KERNELS` → bucket `substrate-kernels`.
 - `[[queues.producers]]` `EVENTS_QUEUE` → queue `analytics-events`
   (created by the analytics repo).
-- `routes` — `kernels.substrate.loopholelabs.io/*` and `kernels.agx.so/*`,
-  both `custom_domain = true`.
-- `[observability]` enabled.
+- `[[unsafe.bindings]]` `DOWNLOAD_RATE_LIMITER_IP` → Rate Limiting
+  binding (60 req/min/IP).
+- `[[routes]]` `kernels.substrate.loopholelabs.io` and `kernels.agx.so`,
+  both `custom_domain = true` (bare hostname, no `/*`).
+- `[observability.logs]` + `[observability.traces]` enabled with
+  persistence (mirrors `agx/cloud/local-certificates`).
 
 ### Lifecycle — manual deploy
 

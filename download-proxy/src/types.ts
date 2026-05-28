@@ -16,6 +16,8 @@ import type { ProxyEnv } from './analytics.ts';
 export interface Env extends ProxyEnv {
   /** The substrate-kernels R2 bucket — bound, not fetched over S3. */
   KERNELS: R2Bucket;
+  /** Per-IP rate limit (60 req/min); the binding is `unsafe` only in wrangler.toml shape. */
+  DOWNLOAD_RATE_LIMITER_IP: RateLimit;
 }
 
 /** A validated R2 object key extracted from the request path. */

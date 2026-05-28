@@ -31,6 +31,16 @@ bucket_name = "substrate-kernels"
 binding = "EVENTS_QUEUE"
 queue = "analytics-events"
 
+# Per-IP rate limit: 60 req/min. Public + unauthenticated; this bounds
+# (a) Workers CPU/request quota from a single source, (b) the analytics
+# queue fan-out from one chatty IP. namespace_id is account-scoped — pick
+# a unique number per Rate Limiting binding in this account.
+[[unsafe.bindings]]
+name = "DOWNLOAD_RATE_LIMITER_IP"
+type = "ratelimit"
+namespace_id = "2001"
+simple = { limit = 60, period = 60 }
+
 # Both public hostnames. `custom_domain = true` captures ALL paths of the
 # subdomain automatically (no `/*` glob — that's the route shape, not the
 # custom-domain shape; see CF docs on Workers routing). Cloudflare creates

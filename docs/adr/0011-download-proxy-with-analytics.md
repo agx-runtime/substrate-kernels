@@ -100,6 +100,9 @@ repo and referenced here only as a dependency.
 - **Every download is observable.** Per-(variant, arch) volume, geo
   distribution, ASN organization, release adoption curves — all queryable
   in ClickHouse without changing kernel-build code.
+- **Per-IP rate limit** (60 req/min, Workers Rate Limiting binding)
+  bounds CPU/request quota and analytics queue fan-out from a single
+  source; the endpoint is public + unauthenticated.
 - **substrate-kernel grows a TypeScript subtree.** Self-contained under
   `download-proxy/`; its tests (`bun test`) and deploy (`bunx wrangler
   deploy`) live there and don't touch the Makefile. The existing `make

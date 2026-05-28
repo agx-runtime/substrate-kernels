@@ -48,7 +48,11 @@ function stubQueue(): SendStub {
 function makeRequest(method: string, path: string, headers: HeadersInit = {}): Request {
   const req = new Request(`https://kernels.substrate.loopholelabs.io${path}`, {
     method,
-    headers,
+    // CF-Connecting-IP keys the per-IP rate limiter. A fresh IP per test
+    // method means the existing cases never trip the limiter; the
+    // dedicated rate-limit test below uses one fixed IP with a stub
+    // binding that denies the second request.
+    headers: { 'CF-Connecting-IP': '203.0.113.42', ...headers },
   });
   // request.cf is populated by CF's edge in production. The proxy-producer
   // enrichment guards on undefined, so omitting it here exercises the
@@ -167,6 +171,29 @@ describe('download-proxy fetch', () => {
 
     expect(res.status).toBe(404);
     expect(sent).toEqual([]);
+  });
+
+  it('returns 429 + Retry-After when the per-IP rate limit denies', async () => {
+    const { sent, queue } = stubQueue();
+    // Stub the rate limiter to deny — the real binding is rate-limited
+    // to 10k/min in miniflare so it'd never trip in tests otherwise.
+    const denyingLimiter: RateLimit = {
+      limit: async () => ({ success: false }),
+    };
+    const testEnv: Env = {
+      ...env,
+      EVENTS_QUEUE: queue as unknown as Env['EVENTS_QUEUE'],
+      DOWNLOAD_RATE_LIMITER_IP: denyingLimiter,
+    };
+
+    const req = makeRequest('GET', `/${FIXTURE_KEY}`);
+    const ctx = createExecutionContext();
+    const res = await worker.fetch(req, testEnv, ctx);
+    await waitOnExecutionContext(ctx);
+
+    expect(res.status).toBe(429);
+    expect(res.headers.get('Retry-After')).toBe('60');
+    expect(sent).toEqual([]); // no analytics emit on a rate-limited request
   });
 
   it('GET SHA256SUMS → text/plain + 200 + one event with linux-SHA256SUMS package', async () => {
