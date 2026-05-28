@@ -18,6 +18,8 @@
  */
 
 import { recordDownload } from './analytics.ts';
+import { renderListingHtml } from './html.ts';
+import { type Listing, listKernels } from './listing.ts';
 import { serveFromR2 } from './r2.ts';
 import { checkRateLimit } from './ratelimit.ts';
 import { parsePath } from './router.ts';
@@ -38,6 +40,15 @@ export default {
     }
 
     const url = new URL(request.url);
+
+    // GET/HEAD `/` → render the kernels listing page from R2. No
+    // analytics emit (it's not a kernel download). 5-min edge cache via
+    // Cache-Control + an ETag derived from the bucket state so repeat
+    // hits short-circuit at the CF edge or via If-None-Match.
+    if (url.pathname === '/' && (request.method === 'GET' || request.method === 'HEAD')) {
+      return await serveListing(request, env);
+    }
+
     const parsed = parsePath(url.pathname);
     if (parsed === null) return new Response('Not found', { status: 404 });
 
@@ -65,3 +76,38 @@ export default {
     return response;
   },
 } satisfies ExportedHandler<Env>;
+
+/**
+ * Serve the `/` listing page. Reads R2 once, renders HTML, sets cache +
+ * ETag headers, honors `If-None-Match` for 304. HEAD returns the same
+ * headers with no body.
+ */
+async function serveListing(request: Request, env: Env): Promise<Response> {
+  const listing = await listKernels(env);
+  const etag = listingEtag(listing);
+  const ifNoneMatch = request.headers.get('If-None-Match');
+  const baseHeaders: Record<string, string> = {
+    'Content-Type': 'text/html; charset=utf-8',
+    'Cache-Control': 'public, max-age=300, s-maxage=300',
+    ETag: etag,
+    Vary: 'Accept-Encoding',
+  };
+  if (ifNoneMatch === etag) {
+    return new Response(null, { status: 304, headers: baseHeaders });
+  }
+  if (request.method === 'HEAD') {
+    return new Response(null, { status: 200, headers: baseHeaders });
+  }
+  const html = renderListingHtml(listing);
+  return new Response(html, { status: 200, headers: baseHeaders });
+}
+
+/**
+ * Quoted ETag derived from artifact count + newest upload timestamp.
+ * Cheap to compute, stable under no-change reloads, and changes whenever
+ * a new artifact is uploaded or an existing one replaced.
+ */
+function listingEtag(listing: Listing): string {
+  const ms = listing.lastUpdated ? listing.lastUpdated.getTime() : 0;
+  return `"l-${listing.totalArtifacts}-${ms}"`;
+}

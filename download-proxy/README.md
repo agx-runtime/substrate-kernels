@@ -13,6 +13,12 @@ download into the analytics events queue.
   [analytics queue protocol spec](https://github.com/loopholelabs/analytics/blob/main/docs/spec/queue-protocol.md)
   (analytics ADR 0015's first-class "hand-roll" path). The producer is
   ~50 lines, self-contained, with no cross-repo install dependency.
+- **`/` lists everything in the bucket** — a SSR'd browseable page
+  ([`src/html.ts`](src/html.ts) + [`src/listing.ts`](src/listing.ts))
+  styled to match the substrate-bench dashboard. 5-minute edge cache,
+  per-row SHA256SUMS link, no analytics emit. See
+  [`../docs/design/download-proxy.md`](../docs/design/download-proxy.md)
+  "Listing page" for the design.
 
 Authoritative design: [`../docs/design/download-proxy.md`](../docs/design/download-proxy.md).
 Authoritative decision: [`../docs/adr/0011-download-proxy-with-analytics.md`](../docs/adr/0011-download-proxy-with-analytics.md).
@@ -62,6 +68,11 @@ configured once in the Cloudflare dashboard; `custom_domain = true` in
 ### Verify end-to-end after deploy
 
 ```bash
+# Browseable listing page (the front door).
+curl -fsSL https://kernels.substrate.loopholelabs.io/ -o /dev/null
+curl -sI https://kernels.substrate.loopholelabs.io/ | grep -E 'HTTP|content-type|cache-control|etag'
+
+# Direct artifact downloads.
 curl -fsSL -o /dev/null https://kernels.substrate.loopholelabs.io/linux-6.12.91-base-x86_64.kernel
 curl -fsSL -o /dev/null https://kernels.agx.so/linux-6.12.91-base-aarch64.kernel
 ```

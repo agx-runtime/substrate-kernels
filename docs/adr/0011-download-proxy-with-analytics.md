@@ -103,6 +103,16 @@ repo and referenced here only as a dependency.
 - **Per-IP rate limit** (60 req/min, Workers Rate Limiting binding)
   bounds CPU/request quota and analytics queue fan-out from a single
   source; the endpoint is public + unauthenticated.
+- **`GET /` is a browseable HTML listing** of every artifact currently
+  in the R2 bucket — SSR by the Worker, 5-min edge cache + ETag,
+  per-row link to that version's SHA256SUMS. Visual identity mirrors
+  the substrate-bench dashboard (`agx/substrate/tools/bench/dashboard/index.html`)
+  so the two pages share an identity; the same three substrate-bench
+  divergences (single-item nav, 3-piece footer, server-curated top
+  card) apply. The Pencil design's cosign claim is replaced with a
+  source-link to this repo — we are reproducibly built, not cosign-
+  signed (yet). [design/download-proxy.md](../design/download-proxy.md)
+  "Listing page" is authoritative.
 - **substrate-kernel grows a TypeScript subtree.** Self-contained under
   `download-proxy/`; its tests (`bun test`) and deploy (`bunx wrangler
   deploy`) live there and don't touch the Makefile. The existing `make

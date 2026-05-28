@@ -15,20 +15,12 @@
  * docs/design/download-proxy.md is authoritative.
  */
 
+import {
+  KERNEL_PATH_PATTERN,
+  MAX_PATH_BYTES,
+  SHA256SUMS_PATH_PATTERN,
+} from './patterns.ts';
 import type { PackageName, R2Key, Version } from './types.ts';
-
-/**
- * Bounded inputs (CLAUDE.md §5 — every dimension named). A URL longer than
- * MAX_PATH_BYTES is rejected before any regex work happens; the version /
- * variant / arch tokens are bounded by the regex character classes.
- */
-const LIMITS = {
-  MAX_PATH_BYTES: 256,
-} as const;
-
-const KERNEL_PATTERN =
-  /^\/linux-(?<version>[0-9]+\.[0-9]+\.[0-9]+)-(?<variant>[a-z]+)-(?<arch>[a-z0-9_]+)\.kernel$/;
-const SHA256SUMS_PATTERN = /^\/linux-(?<version>[0-9]+\.[0-9]+\.[0-9]+)-SHA256SUMS$/;
 
 export interface ParsedRoute {
   r2_key: R2Key;
@@ -45,9 +37,9 @@ export interface ParsedRoute {
  * caller responds 404 and emits NO analytics event.
  */
 export function parsePath(pathname: string): ParsedRoute | null {
-  if (pathname.length > LIMITS.MAX_PATH_BYTES) return null;
+  if (pathname.length > MAX_PATH_BYTES) return null;
 
-  const kernel = KERNEL_PATTERN.exec(pathname);
+  const kernel = KERNEL_PATH_PATTERN.exec(pathname);
   if (kernel?.groups) {
     const { version, variant, arch } = kernel.groups;
     if (!version || !variant || !arch) return null;
@@ -59,7 +51,7 @@ export function parsePath(pathname: string): ParsedRoute | null {
     };
   }
 
-  const sums = SHA256SUMS_PATTERN.exec(pathname);
+  const sums = SHA256SUMS_PATH_PATTERN.exec(pathname);
   if (sums?.groups) {
     const { version } = sums.groups;
     if (!version) return null;

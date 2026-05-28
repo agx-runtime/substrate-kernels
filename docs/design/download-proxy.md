@@ -37,6 +37,7 @@ the producer is hand-rolled per that spec in
 | **Path-shape validation must reject everything that isn't a known artifact** — defense in depth against R2-key probing | tolerant glob over the bucket | pure `parsePath` with two anchored regexes; unknown shapes return 404 BEFORE any R2 read | `test/router.test.ts` covers traversal, query-string bait, wrong extension, casing |
 | **Shape drift between `src/analytics.ts` and `analytics/docs/spec/queue-protocol.md`** — no compile-time link between the two repos | trust the doc and hope | `test/integration.test.ts` asserts every spec-required field on the emitted `QueueEvent` (source, event_name, the dual-ID nulls, the ip_* enrichment surface, the properties shape) — a spec change that breaks the consumer fails this test before deploy | the integration test |
 | **Public + unauthenticated** — one chatty IP can chew CPU/request quota and bloat the analytics queue (one event per full GET) | no limiter | per-IP rate limit via the Workers Rate Limiting binding (`DOWNLOAD_RATE_LIMITER_IP`, 60 req/min, keyed on `CF-Connecting-IP`). Checked BEFORE routing so scan traffic on garbage paths also counts. `429` + `Retry-After: 60` on deny; no analytics emit on a rate-limited request | `test/integration.test.ts` "returns 429 + Retry-After when the per-IP rate limit denies" |
+| **`/` was a dead 404** — bucket is the public face of the kernel artifacts; users hit `kernels.substrate.loopholelabs.io` and saw nothing | redirect to GitHub releases | `GET /` SSRs a browseable listing of the bucket (`src/html.ts` + `src/listing.ts`). 5-min `Cache-Control` + ETag on the response. Visual identity mirrors `agx/substrate/tools/bench/dashboard/index.html` (same CSS variables, fonts, header/footer pattern) and applies the same three substrate-bench "decisions": header nav is just GitHub, footer middle is 3 items (no `changelog`), Featured card is server-curated to the newest mainline version | `test/integration.test.ts` `GET / → 200 HTML listing` |
 
 ## Our design
 
@@ -56,6 +57,74 @@ Worker responds 404 with no analytics emit.
 `sev`, `tdx`); `<arch>` is `[a-z0-9_]+` (`x86_64`, `aarch64`, `riscv64`).
 Path length is bounded; anything over the cap returns null without regex
 work.
+
+### Listing page at `/` — SSR over R2
+
+`GET /` (and `HEAD /`) renders a browseable HTML page of every artifact
+currently in the bucket. The pipeline:
+
+1. `listKernels(env)` in `src/listing.ts` calls `env.KERNELS.list({
+   prefix: 'linux-' })` once, parses each key against the shared
+   patterns in `src/patterns.ts`, drops anything that doesn't match,
+   groups artifacts by `<major>.<minor>` version line, sorts
+   newest-first within each line, and rolls in the per-version
+   `SHA256SUMS` files.
+2. `renderListingHtml(listing)` in `src/html.ts` emits the page —
+   header, hero, toolbar, **Featured** card (server-curated to the
+   newest mainline version, mirroring the bench dashboard's pinned
+   `HEADLINE[]`), kernels table with one row per (version, arch),
+   notes, footer.
+3. The handler stamps `Cache-Control: public, max-age=300, s-maxage=300`
+   and an ETag derived from `<artifactCount>-<lastUploadMs>`. CF's
+   edge caches the page for 5 minutes; `If-None-Match` round-trips to
+   `304` for free.
+4. **No analytics emit** — `/` is not a kernel download. The rate
+   limiter still applies (it runs ahead of any routing, so even `/`
+   counts against the per-IP bucket).
+
+Per-row UX details worth calling out:
+
+- **The SHA256 cell is a per-row link** to the version's
+  `SHA256SUMS` artifact. One click from any row gets you the
+  checksums file covering that version — no separate menu, no
+  scrolling. `event.stopPropagation()` on the link prevents the
+  outer row's download from firing on the same click.
+- **`NEW` pill** on the latest patch in each version line (computed
+  server-side as `isNewest`).
+- **Inline client-side filter / search / sort** (~70 lines of JS)
+  toggles a `.hidden` class on the already-rendered rows; no fetch,
+  no re-render. Search matches version or short-hash prefix, arch
+  segments to `all / x86_64 / aarch64`, sort flips newest ↔ oldest.
+
+The substrate-bench "decisions" applied verbatim (see the section
+"Substrate-bench decisions" below).
+
+### Substrate-bench decisions
+
+The bench dashboard implementation diverges from its own Pencil design
+in three load-bearing ways. The listing page applies the same
+divergences so the two pages share an identity:
+
+| Section | Pencil design | Both pages |
+|---|---|---|
+| Header nav | 4 items (Docs / Benchmarks / Blog / GitHub or +Kernels) | Only `GitHub` (link to https://github.com/loopholelabs) |
+| Footer left | "© 2026" + "Loophole Labs" as two nodes | `© 2026 Loophole Labs` as a single link |
+| Footer middle | `status / changelog / privacy / terms` (4 items) | `status / privacy / terms` (3 items; `changelog` dropped) |
+| Top summary | Generic 4-card grid | Server-curated: bench pins `HEADLINE[]`, kernels pins `featured` = newest mainline |
+
+### Kernel-page-specific copy
+
+The Pencil design's Notes section says "All kernels are reproducibly
+built and signed with cosign." We are NOT cosign-signing yet, so the
+copy swaps the signature claim for a link to the source:
+
+> All kernels are reproducibly built. Source open at
+> [github.com/loopholelabs/substrate-kernel](https://github.com/loopholelabs/substrate-kernel).
+
+Same substitution in the Featured card's mini-nav — `signature` →
+`source`. The link goes in the same slot the cosign reference would
+have occupied so the row's information density and the user's eye-path
+are preserved.
 
 ### Rate limit — per-IP, before routing
 

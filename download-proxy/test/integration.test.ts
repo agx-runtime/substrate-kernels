@@ -219,4 +219,94 @@ describe('download-proxy fetch', () => {
 
     await env.KERNELS.delete(sumsKey);
   });
+
+  describe('GET / — kernels listing page', () => {
+    const X86_KEY = 'linux-6.12.91-base-x86_64.kernel';
+    const ARM_KEY = 'linux-6.12.91-base-aarch64.kernel';
+    const SUMS_KEY = 'linux-6.12.91-SHA256SUMS';
+
+    beforeEach(async () => {
+      await env.KERNELS.put(X86_KEY, new Uint8Array(64));
+      await env.KERNELS.put(ARM_KEY, new Uint8Array(60));
+      await env.KERNELS.put(SUMS_KEY, new TextEncoder().encode('abcd  ' + X86_KEY + '\n'));
+    });
+
+    it('GET / → 200 HTML listing the artifacts, no analytics emit', async () => {
+      const { sent, queue } = stubQueue();
+      const testEnv: Env = { ...env, EVENTS_QUEUE: queue as unknown as Env['EVENTS_QUEUE'] };
+
+      const req = makeRequest('GET', '/');
+      const ctx = createExecutionContext();
+      const res = await worker.fetch(req, testEnv, ctx);
+      await waitOnExecutionContext(ctx);
+
+      expect(res.status).toBe(200);
+      expect(res.headers.get('Content-Type')).toBe('text/html; charset=utf-8');
+      expect(res.headers.get('Cache-Control')).toContain('max-age=300');
+      expect(res.headers.get('ETag')).toMatch(/^"l-\d+-\d+"$/);
+
+      const body = await res.text();
+      // Page structure
+      expect(body).toContain('<title>Substrate — Kernels</title>');
+      expect(body).toContain('Kernels'); // <h1>
+      expect(body).toContain('substrate-kernel-download-proxy'.split('-')[0]); // 'substrate'
+      // Listed artifacts — every key should appear as a download href
+      expect(body).toContain(`href="/${X86_KEY}"`);
+      expect(body).toContain(`href="/${ARM_KEY}"`);
+      // Per-row sha256 link points at the SHA256SUMS for this version
+      expect(body).toContain(`href="/${SUMS_KEY}"`);
+      // Bench-decision: header nav is just GitHub
+      expect(body).toMatch(/<nav class="top">\s*<a [^>]*github\.com\/loopholelabs[^"]*"[^>]*>GitHub<\/a>\s*<\/nav>/);
+      // Bench-decision: footer middle is 3 items, no `changelog`
+      expect(body).not.toMatch(/changelog/i);
+      expect(body).toMatch(/status\.loopholelabs\.io/);
+      expect(body).toMatch(/loopholelabs\.io\/privacy/);
+      expect(body).toMatch(/loopholelabs\.io\/terms/);
+      // Cosign claim replaced by source link
+      expect(body).not.toMatch(/cosign/i);
+      expect(body).toMatch(/github\.com\/loopholelabs\/substrate-kernel/);
+
+      expect(sent).toEqual([]); // not a kernel download
+    });
+
+    it('HEAD / → 200 with the same headers and no body', async () => {
+      const { sent, queue } = stubQueue();
+      const testEnv: Env = { ...env, EVENTS_QUEUE: queue as unknown as Env['EVENTS_QUEUE'] };
+
+      const req = makeRequest('HEAD', '/');
+      const ctx = createExecutionContext();
+      const res = await worker.fetch(req, testEnv, ctx);
+      await waitOnExecutionContext(ctx);
+
+      expect(res.status).toBe(200);
+      expect(res.headers.get('Content-Type')).toBe('text/html; charset=utf-8');
+      expect(res.headers.get('ETag')).toMatch(/^"l-/);
+      const body = await res.arrayBuffer();
+      expect(body.byteLength).toBe(0);
+      expect(sent).toEqual([]);
+    });
+
+    it('If-None-Match round-trip → 304 with no body, no emit', async () => {
+      const { sent, queue } = stubQueue();
+      const testEnv: Env = { ...env, EVENTS_QUEUE: queue as unknown as Env['EVENTS_QUEUE'] };
+
+      const first = await worker.fetch(
+        makeRequest('GET', '/'),
+        testEnv,
+        createExecutionContext(),
+      );
+      const etag = first.headers.get('ETag');
+      expect(etag).toBeTruthy();
+
+      const req = makeRequest('GET', '/', { 'If-None-Match': etag ?? '' });
+      const ctx = createExecutionContext();
+      const res = await worker.fetch(req, testEnv, ctx);
+      await waitOnExecutionContext(ctx);
+
+      expect(res.status).toBe(304);
+      const body = await res.arrayBuffer();
+      expect(body.byteLength).toBe(0);
+      expect(sent).toEqual([]);
+    });
+  });
 });
