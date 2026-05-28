@@ -26,6 +26,7 @@ table: *detail · convention · our handling · the locking gate*) → **Our des
 | The patch series | ordered, justified series | [patches.md](patches.md) |
 | The initramfs | base: substrate-supplied ext4; TEE: vendored blob | [initramfs.md](initramfs.md) |
 | Reproducibility | pinned container + fixed metadata | [reproducibility.md](reproducibility.md) |
+| The download proxy | CF Worker over R2, with one analytics event per download | [download-proxy.md](download-proxy.md) |
 
 ## Naming ([CLAUDE.md](../../CLAUDE.md) §1)
 

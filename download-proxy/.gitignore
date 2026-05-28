@@ -1,0 +1,6 @@
+# Bun / npm install artifacts.
+node_modules/
+# Wrangler local state (logs, type generation, ephemeral D1, etc.).
+.wrangler/
+# Bun's lockfile is checked in (reproducible installs); ignore nothing else
+# from bun.

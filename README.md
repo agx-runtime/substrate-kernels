@@ -74,7 +74,11 @@ loader adopting the `SUBK` format; until then CI boots the produced kernel under
 
 Release artifacts are the `.kernel` bundles plus a `SHA256SUMS` file, published to
 **GitHub Releases** and mirrored to **Cloudflare R2**, served publicly at
-`https://kernels.substrate.loopholelabs.io/`.
+`https://kernels.substrate.loopholelabs.io/` and `https://kernels.agx.so/` via the
+[`download-proxy/`](download-proxy/) Worker — a thin CF Worker that reads R2 via a
+binding and emits one analytics event per full download
+([ADR 0011](docs/adr/0011-download-proxy-with-analytics.md)). Same public URLs,
+same paths; observability is new.
 
 - **Version** comes from the pin (`scripts/kernel-pin.env`, e.g. `6.12.91`). The
   release tag is `v<version>` (e.g. `v6.12.91`), or `v<version>-r<N>` when

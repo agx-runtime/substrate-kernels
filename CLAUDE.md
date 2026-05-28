@@ -381,12 +381,14 @@ a code span or code fence is ignored, which would silently drop the file.
 @docs/adr/0008-kernel-capability-surface-vs-vmm-scope.md
 @docs/adr/0009-confidential-compute-variants.md
 @docs/adr/0010-auto-loaded-doc-context.md
+@docs/adr/0011-download-proxy-with-analytics.md
 @docs/adr/README.md
 
 ### Component design notes (docs/design/)
 @docs/design/README.md
 @docs/design/build-pipeline.md
 @docs/design/bundle-format.md
+@docs/design/download-proxy.md
 @docs/design/kernel-config.md
 @docs/design/patches.md
 @docs/design/initramfs.md

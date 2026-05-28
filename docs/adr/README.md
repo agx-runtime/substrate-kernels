@@ -21,11 +21,14 @@ Context → Decision → Consequences → Alternatives considered, with a `Statu
 | [0008](0008-kernel-capability-surface-vs-vmm-scope.md) | Kernel capability surface vs VMM device scope | Accepted | architecture.md §5/§8 / CLAUDE.md §1 — what the kernel carries vs what substrate exposes; the security boundary |
 | [0009](0009-confidential-compute-variants.md) | Confidential-compute variants (TEE / SEV / TDX) | Accepted | architecture.md §4/§8 / CLAUDE.md §1 — TEE out of base, opt-in and quarantined; vendored firmware/initrd blobs, wiring deferred |
 | [0010](0010-auto-loaded-doc-context.md) | Auto-loaded documentation context (the CLAUDE.md import manifest) | Accepted | CLAUDE.md §7/§10 — a flat `@`-import manifest in CLAUDE.md loads 100% of `docs/`, guarded against drift by `scripts/check-doc-manifest.sh` |
+| [0011](0011-download-proxy-with-analytics.md) | Download proxy with analytics | Accepted | a thin CF Worker (`download-proxy/`) on `kernels.substrate.loopholelabs.io` + `kernels.agx.so` that serves the R2 bucket via binding and emits one `kernel_download` event per full download into the analytics pipeline |
 
 0001 establishes the convention and fixes the pin that roots reproducibility.
 0002–0004 fix the artifact's shape (architectures, bundle format, boot contract).
 0005–0007 fix how it is built (environment + reproducibility, config, patches).
 0008–0009 fix the capability boundary (what the kernel carries vs what substrate
 exposes, and the TEE exception). 0010 records a process decision — how the docs
-themselves load into an agent's context. Further decisions get their own numbered
-ADR here as they land.
+themselves load into an agent's context. 0011 adds the download proxy — the first
+Worker in this repo, sitting between the public download hostnames and the R2
+bucket so every download is observable in the analytics pipeline. Further
+decisions get their own numbered ADR here as they land.

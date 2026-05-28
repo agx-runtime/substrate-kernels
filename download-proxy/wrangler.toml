@@ -1,0 +1,41 @@
+# substrate-kernel download proxy.
+#
+# Bound at the two public hostnames the README documents — clients use the
+# same URL they did when R2 served directly; the Worker is now in front of
+# the bucket, serving via the R2 binding (no S3 SigV4, no egress fees) and
+# emitting one proxy_download analytics event per full download.
+#
+# The Worker MUST live in the same Cloudflare account as the analytics
+# `analytics-events` queue (cross-account queue producer bindings are not
+# supported). That same account hosts the substrate-kernels R2 bucket and
+# the analytics workers.
+#
+# docs/design/download-proxy.md is authoritative.
+
+name = "substrate-kernel-download-proxy"
+main = "src/index.ts"
+compatibility_date = "2025-04-01"
+
+# The R2 bucket that release.yml uploads `.kernel` bundles + SHA256SUMS to.
+# Bound directly — the Worker never speaks S3.
+[[r2_buckets]]
+binding = "KERNELS"
+bucket_name = "substrate-kernels"
+
+# Producer side of the analytics events queue — declared in the analytics
+# repo's wrangler.toml. The proxy-producer library writes onto this binding.
+[[queues.producers]]
+binding = "EVENTS_QUEUE"
+queue = "analytics-events"
+
+# Both public hostnames. Direct R2 S3 URLs remain accessible as a
+# break-glass for ops; clients use these.
+routes = [
+  { pattern = "kernels.substrate.loopholelabs.io/*", custom_domain = true },
+  { pattern = "kernels.agx.so/*", custom_domain = true },
+]
+
+# Observable logs in the Cloudflare dashboard for the lifetime of the
+# Worker. Cheap; matches the analytics workers' setup.
+[observability]
+enabled = true
