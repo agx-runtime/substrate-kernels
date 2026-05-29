@@ -66,6 +66,15 @@ repo and referenced here only as a dependency.
    producer swallows queue-send failures, so an analytics outage cannot
    block a kernel download.
 
+   The event's `source` is `WEB:<HOSTNAME UPPERCASE>` (e.g.
+   `WEB:KERNELS.AGX.SO`), derived from the request host so it matches the
+   listing page's RudderStack SDK events on the same host; its
+   `anonymous_id` is the caller-supplied id (the `X-Substrate-Anonymous-Id`
+   header for the CLI, the `substrate_aid` cookie for a browser) when it
+   passes validation, else a fresh random UUID. The web-analytics surface,
+   the per-host write keys, and the click→download correlation are
+   [ADR 0012](0012-listing-page-web-analytics-and-correlation.md).
+
    Substrate-kernel does NOT take a package dependency on the analytics
    monorepo. The analytics repo is private, bun 1.3.x cannot authenticate
    private GitHub git installs (no env-var expansion in dep URLs, no

@@ -382,6 +382,7 @@ a code span or code fence is ignored, which would silently drop the file.
 @docs/adr/0009-confidential-compute-variants.md
 @docs/adr/0010-auto-loaded-doc-context.md
 @docs/adr/0011-download-proxy-with-analytics.md
+@docs/adr/0012-listing-page-web-analytics-and-correlation.md
 @docs/adr/README.md
 
 ### Component design notes (docs/design/)

@@ -1,8 +1,10 @@
 /**
  * substrate-kernel download proxy. A thin Cloudflare Worker bound at
  * `kernels.substrate.loopholelabs.io` and `kernels.agx.so` that serves
- * `.kernel` bundles + SHA256SUMS from R2 and emits one `proxy_download`
- * event per successful full download into the analytics events queue.
+ * `.kernel` bundles + SHA256SUMS from R2 and emits one `kernel_download`
+ * event per successful full download into the analytics events queue. The
+ * `/` listing page also loads the RudderStack SDK (docs/adr/0012) so page
+ * views / searches / download-clicks land in the same pipeline.
  *
  * Substrate-kernel CLAUDE.md §1: substrate-native naming; the artifact
  * we serve is the *kernel bundle* (the SUBK header + payload), produced
@@ -23,7 +25,7 @@ import { type Listing, listKernels } from './listing.ts';
 import { serveFromR2 } from './r2.ts';
 import { checkRateLimit } from './ratelimit.ts';
 import { parsePath } from './router.ts';
-import type { Env } from './types.ts';
+import type { AnalyticsConfig, Env } from './types.ts';
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -84,7 +86,11 @@ export default {
  */
 async function serveListing(request: Request, env: Env): Promise<Response> {
   const listing = await listKernels(env);
-  const etag = listingEtag(listing);
+  const hostname = new URL(request.url).hostname;
+  const analytics = resolveAnalytics(env, hostname);
+  // The page HTML embeds a per-host write key, so fold the host into the
+  // ETag — otherwise two hosts would share an ETag for different bodies.
+  const etag = listingEtag(listing, hostname);
   const ifNoneMatch = request.headers.get('If-None-Match');
   const baseHeaders: Record<string, string> = {
     'Content-Type': 'text/html; charset=utf-8',
@@ -98,16 +104,40 @@ async function serveListing(request: Request, env: Env): Promise<Response> {
   if (request.method === 'HEAD') {
     return new Response(null, { status: 200, headers: baseHeaders });
   }
-  const html = renderListingHtml(listing);
+  const html = renderListingHtml(listing, analytics);
   return new Response(html, { status: 200, headers: baseHeaders });
 }
 
 /**
- * Quoted ETag derived from artifact count + newest upload timestamp.
- * Cheap to compute, stable under no-change reloads, and changes whenever
- * a new artifact is uploaded or an existing one replaced.
+ * Quoted ETag derived from artifact count + newest upload timestamp + host.
+ * Cheap to compute, stable under no-change reloads, and changes whenever a
+ * new artifact is uploaded or an existing one replaced. The host is folded
+ * in because the embedded analytics write key is per-host.
  */
-function listingEtag(listing: Listing): string {
+function listingEtag(listing: Listing, hostname: string): string {
   const ms = listing.lastUpdated ? listing.lastUpdated.getTime() : 0;
-  return `"l-${listing.totalArtifacts}-${ms}"`;
+  return `"l-${listing.totalArtifacts}-${ms}-${hostname}"`;
+}
+
+/**
+ * Resolve the analytics config for a request host: the write key mapped to
+ * this hostname plus the data plane URL, or `null` when either var is unset
+ * or the host has no mapped key — the listing page then renders without the
+ * SDK (graceful no-op). docs/adr/0012.
+ */
+function resolveAnalytics(env: Env, hostname: string): AnalyticsConfig | null {
+  const dataPlaneUrl = env.ANALYTICS_DATA_PLANE_URL;
+  const mapJson = env.ANALYTICS_WRITE_KEYS;
+  if (!dataPlaneUrl || !mapJson) return null;
+  let map: unknown;
+  try {
+    map = JSON.parse(mapJson);
+  } catch {
+    console.error('download-proxy: ANALYTICS_WRITE_KEYS is not valid JSON');
+    return null;
+  }
+  if (typeof map !== 'object' || map === null) return null;
+  const writeKey = (map as Record<string, unknown>)[hostname];
+  if (typeof writeKey !== 'string' || writeKey.length === 0) return null;
+  return { writeKey, dataPlaneUrl };
 }
