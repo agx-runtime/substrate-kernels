@@ -27,14 +27,22 @@ import {
   humanSize,
   shortHash,
 } from './listing.ts';
+import type { AnalyticsConfig } from './types.ts';
 
 const REPO_URL = 'https://github.com/loopholelabs/substrate-kernel';
 const ORG_URL = 'https://github.com/loopholelabs';
 const RELEASES_URL = `${REPO_URL}/releases`;
 const DESIGN_DOC_URL = `${REPO_URL}/blob/main/docs/design/build-pipeline.md`;
 
-/** Render the full HTML page from a prepared Listing. */
-export function renderListingHtml(listing: Listing): string {
+/**
+ * Render the full HTML page from a prepared Listing. When `analytics` is
+ * provided the RudderStack SDK is injected into <head> (docs/adr/0012);
+ * `null` renders the page without it (graceful no-op).
+ */
+export function renderListingHtml(
+  listing: Listing,
+  analytics: AnalyticsConfig | null = null,
+): string {
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -46,6 +54,7 @@ export function renderListingHtml(listing: Listing): string {
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
 <style>${PAGE_CSS}</style>
+${renderAnalytics(analytics)}
 </head>
 <body>
   ${renderHeader()}
@@ -165,11 +174,7 @@ function renderFeatured(featured: VersionGroup | null): string {
         <span class="v">linux-${esc(featured.version)}</span>
         <span class="rel">released ${esc(releaseDate)}</span>
       </div>
-      <p class="ftBody">Newest mainline Linux ${esc(
-        featured.version,
-      )} bundle for Substrate. ${esc(
-        featured.artifacts.length,
-      )} arch${featured.artifacts.length === 1 ? '' : 'es'} shipped from the pinned tree with reproducible builds; the per-version SHA256SUMS covers every artifact below.</p>
+      <p class="ftBody">The latest mainline Linux kernel, pre-built and tuned for Substrate microVMs — monolithic, virtio-only, and reproducible. Pick an architecture below to download.</p>
       <div class="ftMeta">
         ${featured.artifacts
           .map(
@@ -289,6 +294,26 @@ function renderFooter(): string {
     </div>
     <div class="fright">hello@loopholelabs.io</div>
   </footer>`;
+}
+
+// ---------------------------------------------------------------------------
+// Analytics — the official RudderStack JS SDK v3 cloud-mode load snippet,
+// injected only when a per-host write key is configured (docs/adr/0012).
+// The write key sets `source = WEB:<HOSTNAME UPPERCASE>` on the analytics
+// side, matching the proxy's server-side download event. Two additions to
+// the stock snippet: `.page()` on load, and a self-owned `substrate_aid`
+// cookie set from `getAnonymousId()` so a same-origin `.kernel` download
+// carries the same anonymous id the proxy stamps — that is what correlates
+// the page's `kernel_download_click` with the server-side `kernel_download`.
+// ---------------------------------------------------------------------------
+function renderAnalytics(analytics: AnalyticsConfig | null): string {
+  if (analytics === null) return '';
+  // JSON.stringify → safe JS string literals for the (env-sourced) values.
+  const wk = JSON.stringify(analytics.writeKey);
+  const dp = JSON.stringify(analytics.dataPlaneUrl);
+  return `<script>
+!function(){"use strict";window.RudderSnippetVersion="3.0.62";var identifier="rudderanalytics";window[identifier]||(window[identifier]=[]);var rudderanalytics=window[identifier];if(rudderanalytics.snippetExecuted)window.console&&console.error&&console.error("RudderStack JavaScript SDK snippet included more than once.");else{rudderanalytics.snippetExecuted=!0,window.rudderAnalyticsBuildType="legacy";var sdkBaseUrl="https://cdn.rudderlabs.com/v3";var sdkName="rsa.min.js";var scriptLoadingMode="async";var e=["setDefaultInstanceKey","load","ready","page","track","identify","alias","group","reset","setAnonymousId","startSession","endSession","consent"];for(var n=0;n<e.length;n++){var t=e[n];rudderanalytics[t]=function(e){return function(){var n=Array.prototype.slice.call(arguments);rudderanalytics.push([e].concat(n))}}(t)}try{new Function('class Test{field=()=>{};test({prop=[]}={}){return prop?(prop?.property??[...prop]):import("")}}'),window.rudderAnalyticsBuildType="modern"}catch(a){}var d=document.head||document.getElementsByTagName("head")[0],o=document.body||document.getElementsByTagName("body")[0];window.rudderAnalyticsAddScript=function(e,t,n){var i=document.createElement("script");i.src=e,i.setAttribute("data-loader","RS_JS_SDK"),t&&n&&i.setAttribute(t,n),i.async="async"===scriptLoadingMode,i.defer="defer"===scriptLoadingMode,d?d.insertBefore(i,d.firstChild):o.insertBefore(i,o.firstChild)},window.rudderAnalyticsMount=function(){window.rudderAnalyticsAddScript("".concat(sdkBaseUrl,"/").concat(window.rudderAnalyticsBuildType,"/").concat(sdkName),"data-rsa-write-key",${wk})},"undefined"==typeof Promise||"undefined"==typeof globalThis?window.rudderAnalyticsAddScript("https://polyfill-fastly.io/v3/polyfill.min.js?version=3.111.0&features=Symbol%2CPromise&callback=rudderAnalyticsMount"):window.rudderAnalyticsMount();rudderanalytics.load(${wk},${dp});rudderanalytics.page();rudderanalytics.ready(function(){try{document.cookie="substrate_aid="+rudderanalytics.getAnonymousId()+"; path=/; max-age=31536000; samesite=lax; secure"}catch(e){}})}}();
+</script>`;
 }
 
 // ---------------------------------------------------------------------------
@@ -527,9 +552,13 @@ footer .fright { font-size: 12px; color: var(--muted); }
   .toolbar { flex-direction: column; align-items: stretch; }
   .tbL, .tbR { width: 100%; justify-content: space-between; }
   .search { width: 100%; }
-  .featured { flex-direction: column; align-items: stretch; }
-  .ftR { align-items: stretch; }
-  .ftNav { justify-content: space-between; width: 100%; }
+  /* Keep the featured card compact when it stacks: tighter rhythm and drop
+     the per-arch hash row (recoverable from the table / the artifact URL). */
+  .featured { flex-direction: column; align-items: stretch; gap: 14px; }
+  .ftL { gap: 8px; }
+  .ftMeta { display: none; }
+  .ftR { align-items: stretch; gap: 10px; }
+  .ftNav { justify-content: space-between; width: 100%; flex-wrap: wrap; }
   .titlerow .repolink { display: none; }
 }
 `;
@@ -550,6 +579,40 @@ const PAGE_JS = `
 
   var state = { q: "", arch: "", sort: "newest" };
 
+  // ---- analytics (all no-ops unless the RudderStack SDK was injected) ----
+  // window.rudderanalytics is either the loaded SDK or the buffering stub
+  // (an array whose .track queues until the SDK loads) — both have .track.
+  function ra() {
+    return (window.rudderanalytics &&
+      typeof window.rudderanalytics.track === "function")
+      ? window.rudderanalytics : null;
+  }
+  function track(name, props) {
+    var r = ra();
+    if (r) { try { r.track(name, props); } catch (e) {} }
+  }
+  // Map a download href to its analytics event. Mirrors the server router
+  // patterns so the page and the proxy agree on package/version/arch.
+  function trackDownloadHref(href) {
+    var km = /^\\/linux-(\\d+\\.\\d+\\.\\d+)-([a-z]+)-([a-z0-9_]+)\\.kernel$/.exec(href || "");
+    if (km) {
+      track("kernel_download_click", { package: "linux-" + km[2] + "-" + km[3], version: km[1], arch: km[3] });
+      return;
+    }
+    var sm = /^\\/linux-(\\d+\\.\\d+\\.\\d+)-SHA256SUMS$/.exec(href || "");
+    if (sm) { track("sha256sums_download", { version: sm[1] }); }
+  }
+  // Capture phase: catch every download anchor (featured card, per-row sha
+  // link, per-row .kernel button) before the browser navigates. The SDK's
+  // beacon transport flushes the event on unload, so fire-and-forget is safe.
+  document.addEventListener("click", function (e) {
+    var t = e.target;
+    if (!(t instanceof Element)) return;
+    var a = t.closest("a[href]");
+    if (a) trackDownloadHref(a.getAttribute("href"));
+  }, true);
+  var searchTimer = null;
+
   // Row-click: trigger the row's primary download. The inner <a> tags
   // (.sumslink, .dlbtn) handle their own clicks — closest(".trow") will
   // still match, so guard against re-firing by checking the original
@@ -561,7 +624,7 @@ const PAGE_JS = `
     var row = t.closest(".tartifact");
     if (!row) return;
     var href = row.getAttribute("data-dl");
-    if (href) window.location.href = href;
+    if (href) { trackDownloadHref(href); window.location.href = href; }
   });
   // Keyboard activation for the role=link rows.
   tbl.addEventListener("keydown", function (e) {
@@ -573,6 +636,7 @@ const PAGE_JS = `
     var href = row.getAttribute("data-dl");
     if (href) {
       e.preventDefault();
+      trackDownloadHref(href);
       window.location.href = href;
     }
   });
@@ -660,6 +724,12 @@ const PAGE_JS = `
     q.addEventListener("input", function () {
       state.q = q.value || "";
       applyFilter();
+      // Debounced so we record the settled query, not every keystroke.
+      if (searchTimer) clearTimeout(searchTimer);
+      searchTimer = setTimeout(function () {
+        var query = state.q.trim();
+        if (query.length > 0) track("kernel_search", { query: query });
+      }, 500);
     });
   }
   if (segArch) {

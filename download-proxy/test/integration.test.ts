@@ -5,12 +5,14 @@
  * the analytics emit happens (or not) on each path.
  *
  * Cases mirror docs/design/download-proxy.md:
- *   - GET full body            → 200 + body + one queue send (source=kernel_download_proxy, event_name=kernel_download)
+ *   - GET full body            → 200 + body + one queue send (source=WEB:<HOST>, event_name=kernel_download)
+ *   - GET + anon-id header/cookie → event carries the supplied anonymous_id
  *   - HEAD                     → 200 + headers + NO queue send
  *   - GET with Range           → 206 + Content-Range + NO queue send
  *   - GET missing R2 key       → 404 + NO queue send
  *   - POST                     → 405 + NO queue send
  *   - GET unknown path shape   → 404 + NO queue send
+ *   - GET /                    → listing page; RudderStack SDK injected iff a write key is configured
  */
 
 import {
@@ -26,6 +28,9 @@ const FIXTURE_KEY = 'linux-6.12.91-base-x86_64.kernel';
 // Tiny deterministic payload — large enough to make Content-Length / Range
 // asserts meaningful, small enough to print on a failure without flooding.
 const FIXTURE_BODY = new Uint8Array(64).map((_, i) => (i * 7 + 3) & 0xff);
+// makeRequest uses the kernels.substrate.loopholelabs.io host, so the
+// server-side download event's source is WEB:<that host, uppercased>.
+const EXPECTED_SOURCE = 'WEB:KERNELS.SUBSTRATE.LOOPHOLELABS.IO';
 
 interface SendStub {
   sent: unknown[];
@@ -88,16 +93,79 @@ describe('download-proxy fetch', () => {
 
     expect(sent).toHaveLength(1);
     const event = sent[0] as Record<string, unknown>;
-    expect(event.source).toBe('kernel_download_proxy');
+    expect(event.source).toBe(EXPECTED_SOURCE);
     expect(event.event_name).toBe('kernel_download');
     expect(event.user_id).toBeNull();
     expect(event.group_id).toBeNull();
+    // No header/cookie supplied → a fresh random UUID.
     expect(event.anonymous_id).toEqual(expect.any(String));
     expect(event.properties).toEqual({
       package: 'linux-base-x86_64',
       version: '6.12.91',
       bytes: FIXTURE_BODY.length,
     });
+  });
+
+  it('GET with X-Substrate-Anonymous-Id header → event carries that anonymous_id', async () => {
+    const { sent, queue } = stubQueue();
+    const testEnv: Env = { ...env, EVENTS_QUEUE: queue as unknown as Env['EVENTS_QUEUE'] };
+
+    const anon = 'cli-machine-uuid-1234';
+    const req = makeRequest('GET', `/${FIXTURE_KEY}`, { 'X-Substrate-Anonymous-Id': anon });
+    const ctx = createExecutionContext();
+    await worker.fetch(req, testEnv, ctx);
+    await waitOnExecutionContext(ctx);
+
+    expect(sent).toHaveLength(1);
+    expect((sent[0] as Record<string, unknown>).anonymous_id).toBe(anon);
+  });
+
+  it('GET with substrate_aid cookie → event carries that anonymous_id', async () => {
+    const { sent, queue } = stubQueue();
+    const testEnv: Env = { ...env, EVENTS_QUEUE: queue as unknown as Env['EVENTS_QUEUE'] };
+
+    const anon = '8f2b9c10-1111-2222-3333-444455556666';
+    const req = makeRequest('GET', `/${FIXTURE_KEY}`, {
+      Cookie: `other=x; substrate_aid=${anon}; another=y`,
+    });
+    const ctx = createExecutionContext();
+    await worker.fetch(req, testEnv, ctx);
+    await waitOnExecutionContext(ctx);
+
+    expect(sent).toHaveLength(1);
+    expect((sent[0] as Record<string, unknown>).anonymous_id).toBe(anon);
+  });
+
+  it('header beats cookie when both are present', async () => {
+    const { sent, queue } = stubQueue();
+    const testEnv: Env = { ...env, EVENTS_QUEUE: queue as unknown as Env['EVENTS_QUEUE'] };
+
+    const req = makeRequest('GET', `/${FIXTURE_KEY}`, {
+      'X-Substrate-Anonymous-Id': 'from-header',
+      Cookie: 'substrate_aid=from-cookie',
+    });
+    const ctx = createExecutionContext();
+    await worker.fetch(req, testEnv, ctx);
+    await waitOnExecutionContext(ctx);
+
+    expect((sent[0] as Record<string, unknown>).anonymous_id).toBe('from-header');
+  });
+
+  it('rejects a malformed anonymous_id and falls back to a fresh UUID', async () => {
+    const { sent, queue } = stubQueue();
+    const testEnv: Env = { ...env, EVENTS_QUEUE: queue as unknown as Env['EVENTS_QUEUE'] };
+
+    // Contains a space + a slash — outside the accepted charset.
+    const bad = 'not a valid/id';
+    const req = makeRequest('GET', `/${FIXTURE_KEY}`, { 'X-Substrate-Anonymous-Id': bad });
+    const ctx = createExecutionContext();
+    await worker.fetch(req, testEnv, ctx);
+    await waitOnExecutionContext(ctx);
+
+    const id = (sent[0] as Record<string, unknown>).anonymous_id as string;
+    expect(id).not.toBe(bad);
+    // A UUID, not the rejected input.
+    expect(id).toMatch(/^[0-9a-f-]{36}$/);
   });
 
   it('HEAD on a present .kernel → 200 headers + NO event', async () => {
@@ -243,7 +311,8 @@ describe('download-proxy fetch', () => {
       expect(res.status).toBe(200);
       expect(res.headers.get('Content-Type')).toBe('text/html; charset=utf-8');
       expect(res.headers.get('Cache-Control')).toContain('max-age=300');
-      expect(res.headers.get('ETag')).toMatch(/^"l-\d+-\d+"$/);
+      // ETag folds in the host (the page embeds a per-host analytics key).
+      expect(res.headers.get('ETag')).toMatch(/^"l-\d+-\d+-[\w.-]+"$/);
 
       const body = await res.text();
       // Page structure
@@ -265,8 +334,57 @@ describe('download-proxy fetch', () => {
       // Cosign claim replaced by source link
       expect(body).not.toMatch(/cosign/i);
       expect(body).toMatch(/github\.com\/loopholelabs\/substrate-kernel/);
+      // No analytics vars configured here → the SDK loader is NOT injected
+      // (the always-present client JS still references window.rudderanalytics
+      // as a no-op, so the loader URL is the reliable presence marker).
+      expect(body).not.toContain('cdn.rudderlabs.com');
+      expect(body).not.toContain('rudderanalytics.load(');
 
       expect(sent).toEqual([]); // not a kernel download
+    });
+
+    it('GET / with a write key configured → injects the RudderStack SDK for the host', async () => {
+      const { queue } = stubQueue();
+      const testEnv: Env = {
+        ...env,
+        EVENTS_QUEUE: queue as unknown as Env['EVENTS_QUEUE'],
+        ANALYTICS_DATA_PLANE_URL: 'https://data.agx.so',
+        ANALYTICS_WRITE_KEYS: JSON.stringify({
+          'kernels.substrate.loopholelabs.io': 'test-web-key',
+        }),
+      };
+
+      const req = makeRequest('GET', '/');
+      const ctx = createExecutionContext();
+      const res = await worker.fetch(req, testEnv, ctx);
+      await waitOnExecutionContext(ctx);
+
+      const body = await res.text();
+      // SDK loader + our configured write key + data plane URL.
+      expect(body).toContain('cdn.rudderlabs.com');
+      expect(body).toContain('rudderanalytics.load("test-web-key","https://data.agx.so")');
+      // The correlation cookie is set from the SDK's anonymous id.
+      expect(body).toContain('substrate_aid');
+    });
+
+    it('GET / does NOT inject the SDK for a host with no mapped write key', async () => {
+      const { queue } = stubQueue();
+      const testEnv: Env = {
+        ...env,
+        EVENTS_QUEUE: queue as unknown as Env['EVENTS_QUEUE'],
+        ANALYTICS_DATA_PLANE_URL: 'https://data.agx.so',
+        // Map a DIFFERENT host — the request host has no key, so no SDK.
+        ANALYTICS_WRITE_KEYS: JSON.stringify({ 'kernels.agx.so': 'other-key' }),
+      };
+
+      const req = makeRequest('GET', '/');
+      const ctx = createExecutionContext();
+      const res = await worker.fetch(req, testEnv, ctx);
+      await waitOnExecutionContext(ctx);
+
+      const body = await res.text();
+      expect(body).not.toContain('cdn.rudderlabs.com');
+      expect(body).not.toContain('rudderanalytics.load(');
     });
 
     it('HEAD / → 200 with the same headers and no body', async () => {

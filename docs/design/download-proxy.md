@@ -38,6 +38,10 @@ the producer is hand-rolled per that spec in
 | **Shape drift between `src/analytics.ts` and `analytics/docs/spec/queue-protocol.md`** — no compile-time link between the two repos | trust the doc and hope | `test/integration.test.ts` asserts every spec-required field on the emitted `QueueEvent` (source, event_name, the dual-ID nulls, the ip_* enrichment surface, the properties shape) — a spec change that breaks the consumer fails this test before deploy | the integration test |
 | **Public + unauthenticated** — one chatty IP can chew CPU/request quota and bloat the analytics queue (one event per full GET) | no limiter | per-IP rate limit via the Workers Rate Limiting binding (`DOWNLOAD_RATE_LIMITER_IP`, 60 req/min, keyed on `CF-Connecting-IP`). Checked BEFORE routing so scan traffic on garbage paths also counts. `429` + `Retry-After: 60` on deny; no analytics emit on a rate-limited request | `test/integration.test.ts` "returns 429 + Retry-After when the per-IP rate limit denies" |
 | **`/` was a dead 404** — bucket is the public face of the kernel artifacts; users hit `kernels.substrate.loopholelabs.io` and saw nothing | redirect to GitHub releases | `GET /` SSRs a browseable listing of the bucket (`src/html.ts` + `src/listing.ts`). 5-min `Cache-Control` + ETag on the response. Visual identity mirrors `agx/substrate/tools/bench/dashboard/index.html` (same CSS variables, fonts, header/footer pattern) and applies the same three substrate-bench "decisions": header nav is just GitHub, footer middle is 3 items (no `changelog`), Featured card is server-curated to the newest mainline version | `test/integration.test.ts` `GET / → 200 HTML listing` |
+| **`source` should name the site for per-domain slicing** ([ADR 0012](../adr/0012-listing-page-web-analytics-and-correlation.md)) | a fixed producer label | `source = WEB:<HOSTNAME UPPERCASE>` on **both** the proxy event (derived from the request host) and the page SDK events (via the per-host write key → KV mapping); they match per host. `event_name` distinguishes `kernel_download` (server) from `kernel_download_click` (web) | `test/integration.test.ts` asserts `source = WEB:<HOST>` |
+| **The proxy event's `anonymous_id` was a throwaway** — nothing could be tied to it | fresh random per download | resolve `X-Substrate-Anonymous-Id` header (CLI) → `substrate_aid` cookie (browser) → fresh UUID; a supplied id must be ≤128 chars + `[A-Za-z0-9._:-]` or it is ignored (never poisons the column) | `test/integration.test.ts` header / cookie / header-beats-cookie / malformed-fallback |
+| **Correlating a page download-click with the actual transfer** without an id in the URL | redirect with the id in the query string (cache fragmentation) | the listing page + the proxy are **same origin**, so a first-party `substrate_aid` cookie (set from the SDK's `getAnonymousId()`) rides the same-origin download navigation; the proxy reads it. No URL change, no edge-cache fragmentation | end-to-end (ClickHouse join on `anonymous_id`); cookie-read covered by the integration test |
+| **The listing page had no visit analytics** | none | `GET /` injects the official RudderStack v3 SDK (cloud-mode) pointed at `ANALYTICS_DATA_PLANE_URL`, with the per-host write key from `ANALYTICS_WRITE_KEYS`; fires `page` / `kernel_search` / `kernel_download_click` / `sha256sums_download`. Injected only when a write key is configured for the host — else the page renders without it (graceful) | `test/integration.test.ts` "GET / with a write key configured" / "does NOT inject … no mapped write key" |
 
 ## Our design
 
@@ -167,13 +171,48 @@ if (request.method === 'GET' && response.status === 200) {
 }
 ```
 
-`recordDownload` (`src/analytics.ts`) stamps `source: 'kernel_download_proxy'`,
-`event_name: 'kernel_download'`, a fresh `anonymous_id`, `user_id: null`,
-`group_id: null`, the `request.cf`-derived `ip_*` enrichment, and
+`recordDownload` (`src/analytics.ts`) stamps `source = WEB:<HOSTNAME UPPERCASE>`
+(derived from the request host — e.g. `WEB:KERNELS.AGX.SO`),
+`event_name: 'kernel_download'`, the resolved `anonymous_id` (header →
+cookie → fresh UUID; see below), `user_id: null`, `group_id: null`, the
+`request.cf`-derived `ip_*` enrichment, and
 `properties = { package, version, bytes }` — the exact shape the
 [analytics queue protocol spec](https://github.com/loopholelabs/analytics/blob/main/docs/spec/queue-protocol.md)
 requires. The queue write is `ctx.waitUntil`-ed so the response returns
 immediately; failures are logged to `console.error` and swallowed.
+
+### Listing-page analytics + correlation ([ADR 0012](../adr/0012-listing-page-web-analytics-and-correlation.md))
+
+`GET /` injects the official RudderStack v3 SDK (cloud-mode) into `<head>`
+when a write key is configured for the request host. `download-proxy/src/index.ts`
+`resolveAnalytics(env, hostname)` reads `ANALYTICS_DATA_PLANE_URL` and the
+`ANALYTICS_WRITE_KEYS` `hostname → write key` map; `renderAnalytics`
+(`src/html.ts`) emits the loader (`rudderanalytics.load(<key>, <dataPlaneUrl>)`,
+`.page()`) or nothing (graceful). The write key sets `source = WEB:<HOST>` on
+the analytics side, so page events and the proxy event match per host.
+
+The page fires `track` events from the inline client JS: `kernel_search`
+(debounced), and `kernel_download_click` / `sha256sums_download` on the
+matching download clicks (a capture-phase listener catches the anchors; the
+row-click handler tracks the keyboard/row navigations). All `track` calls
+are no-ops unless the SDK loaded.
+
+**Correlation.** On SDK ready, the page sets a first-party cookie
+`substrate_aid = rudderanalytics.getAnonymousId()` (`Path=/; SameSite=Lax;
+Secure`). Because the listing page and the download proxy are the **same
+origin**, that cookie rides the same-origin navigation to a `/<artifact>`
+URL; `recordDownload` reads it (`resolveAnonymousId`) and stamps it as the
+`kernel_download` event's `anonymous_id`. The page's `kernel_download_click`
+and the server's `kernel_download` then share one `anonymous_id` — joinable
+in ClickHouse — with no id in the URL. The CLI supplies its id via the
+`X-Substrate-Anonymous-Id` header instead (header wins over cookie). A
+supplied id must be ≤128 chars and `[A-Za-z0-9._:-]`, else it is ignored
+and a fresh UUID is used.
+
+**Dependency (analytics side, separate repo):** CORS from these hostnames on
+the ingest, a web write key per domain in the `WRITE_KEYS` KV (each mapped to
+`WEB:<HOST>`), and a reachable SDK source config. Until those exist the page
+no-ops cleanly (no write key configured → no SDK).
 
 ### Bindings — `download-proxy/wrangler.toml`
 
@@ -182,6 +221,9 @@ immediately; failures are logged to `console.error` and swallowed.
   (created by the analytics repo).
 - `[[unsafe.bindings]]` `DOWNLOAD_RATE_LIMITER_IP` → Rate Limiting
   binding (60 req/min/IP).
+- `[vars]` `ANALYTICS_DATA_PLANE_URL` (`https://data.agx.so`) and
+  `ANALYTICS_WRITE_KEYS` (a JSON `hostname → write key` map; write keys are
+  not secrets per analytics ADR 0010). Absent / unmatched host → no SDK.
 - `[[routes]]` `kernels.substrate.loopholelabs.io` and `kernels.agx.so`,
   both `custom_domain = true` (bare hostname, no `/*`).
 - `[observability.logs]` + `[observability.traces]` enabled with
@@ -211,11 +253,15 @@ Two test files under `download-proxy/test/`, both run via
   `recordDownload` call shape without standing up a consumer. Asserts
   one emit on full GET, zero emits on HEAD/Range/404/405/unknown-path,
   correct `package`/`version`/`bytes` on the event, correct status +
-  headers + body on the response.
+  headers + body on the response, `source = WEB:<HOST>`, the `anonymous_id`
+  resolution (header / cookie / header-beats-cookie / malformed-fallback),
+  and that `GET /` injects the SDK only when a write key is configured.
 
 End-to-end verification after deploy (`download-proxy/README.md`
 captures the exact commands): `curl` the public hostnames for a known
-kernel bundle, then query ClickHouse for `source = 'kernel_download_proxy'` events in
-the last 10 minutes. CLAUDE.md §8 — tests panic on missing resources:
-the integration test seeds R2 from a known fixture; absence fails loud,
-no silent skip.
+kernel bundle, then query ClickHouse for `source = 'WEB:KERNELS.AGX.SO'`
+(or the other host) events in the last 10 minutes; for the click→download
+join, load the page, click a download, and confirm the
+`kernel_download_click` and `kernel_download` rows share one `anonymous_id`.
+CLAUDE.md §8 — tests panic on missing resources: the integration test seeds
+R2 from a known fixture; absence fails loud, no silent skip.

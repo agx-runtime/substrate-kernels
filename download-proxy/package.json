@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Cloudflare Worker that proxies the substrate-kernels R2 bucket and emits one proxy_download analytics event per full download. Self-contained: the analytics producer is implemented locally per the analytics queue protocol spec (analytics ADR 0015's hand-roll path).",
+  "description": "Cloudflare Worker that proxies the substrate-kernels R2 bucket and emits one kernel_download analytics event per full download. Self-contained: the analytics producer is implemented locally per the analytics queue protocol spec (analytics ADR 0015's hand-roll path).",
   "scripts": {
     "test": "vitest run",
     "dev": "wrangler dev",

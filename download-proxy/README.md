@@ -80,18 +80,22 @@ curl -fsSL -o /dev/null https://kernels.agx.so/linux-6.12.91-base-aarch64.kernel
 Then in ClickHouse (the analytics destination):
 
 ```sql
-SELECT received_at, properties.package, properties.version,
-       properties.bytes, ip_country, ip_org
+SELECT received_at, source, anonymous_id, properties.package,
+       properties.version, properties.bytes, ip_country, ip_org
 FROM events
-WHERE source = 'kernel_download_proxy'
+WHERE source IN ('WEB:KERNELS.SUBSTRATE.LOOPHOLELABS.IO', 'WEB:KERNELS.AGX.SO')
   AND event_name = 'kernel_download'
   AND received_at >= now() - INTERVAL 10 MINUTE
 ORDER BY received_at DESC
 LIMIT 10;
 ```
 
-Two rows, one per hostname, with `package = "linux-base-<arch>"`,
-`version = "6.12.91"`, `bytes` matching the file size on disk.
+Two rows, one per hostname, with `source = WEB:<HOST>`,
+`package = "linux-base-<arch>"`, `version = "6.12.91"`, `bytes` matching the
+file size on disk. The `anonymous_id` is the caller-supplied id when the CLI
+sends `X-Substrate-Anonymous-Id` or a browser carries the `substrate_aid`
+cookie (set by the listing-page RudderStack SDK), else a fresh UUID — see
+[ADR 0012](../docs/adr/0012-listing-page-web-analytics-and-correlation.md).
 
 ## Tracking the analytics queue spec
 

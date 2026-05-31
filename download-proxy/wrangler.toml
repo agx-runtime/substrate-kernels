@@ -3,7 +3,7 @@
 # Bound at the two public hostnames the README documents — clients use the
 # same URL they did when R2 served directly; the Worker is now in front of
 # the bucket, serving via the R2 binding (no S3 SigV4, no egress fees) and
-# emitting one proxy_download analytics event per full download.
+# emitting one kernel_download analytics event per full download.
 #
 # The Worker MUST live in the same Cloudflare account as the analytics
 # `analytics-events` queue (cross-account queue producer bindings are not
@@ -30,6 +30,23 @@ bucket_name = "substrate-kernels"
 [[queues.producers]]
 binding = "EVENTS_QUEUE"
 queue = "analytics-events"
+
+# Listing-page analytics (docs/adr/0012). `GET /` loads the RudderStack SDK
+# pointed at this data plane; per-host write keys map each domain to its
+# `source = WEB:<HOSTNAME UPPERCASE>` on the analytics side. Write keys are
+# NOT secrets (analytics ADR 0010), so they live in [vars]. The SDK is
+# injected only when a write key is configured for the request host — until
+# ANALYTICS_WRITE_KEYS is set, the page renders without the SDK (graceful).
+# Dependency: the analytics ingest (data.agx.so) must allow CORS from these
+# hostnames and have a web write key per domain provisioned in its WRITE_KEYS
+# KV (each record: { source: "WEB:KERNELS.AGX.SO", enabled: true }).
+[vars]
+ANALYTICS_DATA_PLANE_URL = "https://data.agx.so"
+# Per-host web write keys (not secrets — analytics ADR 0010). Each key's
+# analytics-side KV record stamps the matching source; the proxy's own
+# kernel_download event derives the same WEB:<HOST> string from the request
+# host, so the page events and the download event share `source` per host.
+ANALYTICS_WRITE_KEYS = '{"kernels.agx.so":"99bc203c52705a8f0d6027f3f08c5e3ffe775fd9db3d9881","kernels.substrate.loopholelabs.io":"19bd9b376d833af85b1e0e55edaba2f5fc6750e78e5f1382"}'
 
 # Per-IP rate limit: 60 req/min. Public + unauthenticated; this bounds
 # (a) Workers CPU/request quota from a single source, (b) the analytics

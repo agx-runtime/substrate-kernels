@@ -1,5 +1,5 @@
 /**
- * `proxy_download` event producer for the substrate-kernel download proxy.
+ * `kernel_download` event producer for the substrate-kernel download proxy.
  *
  * Hand-rolled per the analytics queue contract at
  *   https://github.com/loopholelabs/analytics/blob/main/docs/spec/queue-protocol.md
@@ -28,15 +28,28 @@ type GroupId = string & { readonly __brand: 'GroupId' };
 type MessageId = string & { readonly __brand: 'MessageId' };
 
 // `source` is an open set per the analytics queue-protocol spec — any
-// non-empty bounded label is accepted. We use `kernel_download_proxy` so
-// dashboards can slice this Worker's events out from other proxies.
+// non-empty bounded label (≤ MAX_SOURCE_LENGTH = 64) is accepted. This
+// Worker stamps `WEB:<HOSTNAME UPPERCASE>` (e.g. `WEB:KERNELS.AGX.SO`) so the
+// server-side download event shares one `source` with the listing page's
+// RudderStack SDK events on the same host (those get the same source via the
+// per-host write key → KV mapping; docs/adr/0012). Dashboards GROUP BY
+// `source` for per-domain totals; `event_name` distinguishes the actual byte
+// transfer (`kernel_download`) from the page's click intent
+// (`kernel_download_click`).
 type EventSource = string;
 
-/** The literal source label this Worker stamps on every event. */
-const SOURCE: EventSource = 'kernel_download_proxy';
-
-/** The literal event_name this Worker stamps on every event. */
+/** The literal event_name this Worker stamps on every download event. */
 const EVENT_NAME = 'kernel_download';
+
+// Where a caller-supplied anonymous id can arrive. The CLI sets the header;
+// the listing page sets the cookie (from the RudderStack SDK's anonymous id)
+// so a same-origin download navigation carries it — that is what correlates
+// the page's `kernel_download_click` with this server-side `kernel_download`
+// (docs/adr/0012). Absent/invalid → a fresh random UUID (no continuity).
+const ANON_ID_HEADER = 'X-Substrate-Anonymous-Id';
+const ANON_ID_COOKIE = 'substrate_aid';
+/** Bounds + charset for an accepted anonymous id (≤128 = analytics MAX_ID_LENGTH). */
+const ANON_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
 
 /**
  * The row that lands on the analytics queue and (1:1) in the `events`
@@ -106,10 +119,41 @@ function enrichFromRequest(req: Request): {
   };
 }
 
+/** Read one cookie value out of a `Cookie` header (case-sensitive name). */
+function parseCookie(header: string | null, name: string): string | null {
+  if (header === null) return null;
+  for (const part of header.split(';')) {
+    const eq = part.indexOf('=');
+    if (eq < 0) continue;
+    if (part.slice(0, eq).trim() === name) return part.slice(eq + 1).trim();
+  }
+  return null;
+}
+
 /**
- * Send one `proxy_download` event. Call via `ctx.waitUntil(...)` after
- * the response is on the wire — `recordDownload` resolves regardless of
- * queue health.
+ * Resolve the event's anonymous id: the `X-Substrate-Anonymous-Id` header
+ * (CLI) wins, then the `substrate_aid` cookie (browser, same-origin), then a
+ * fresh random UUID. A supplied id must match ANON_ID_PATTERN — anything else
+ * is ignored (so a malformed input never poisons the column) and falls
+ * through to random.
+ */
+function resolveAnonymousId(req: Request): AnonymousId {
+  const header = req.headers.get(ANON_ID_HEADER);
+  if (header !== null && ANON_ID_PATTERN.test(header)) return header as AnonymousId;
+  const cookie = parseCookie(req.headers.get('Cookie'), ANON_ID_COOKIE);
+  if (cookie !== null && ANON_ID_PATTERN.test(cookie)) return cookie as AnonymousId;
+  return crypto.randomUUID() as AnonymousId;
+}
+
+/** `source` = `WEB:<HOSTNAME UPPERCASE>` derived from the request's host. */
+function webSource(req: Request): EventSource {
+  return `WEB:${new URL(req.url).hostname.toUpperCase()}`;
+}
+
+/**
+ * Send one `kernel_download` event. Call via `ctx.waitUntil(...)` after the
+ * response is on the wire — `recordDownload` resolves regardless of queue
+ * health.
  */
 export async function recordDownload(
   req: Request,
@@ -119,13 +163,12 @@ export async function recordDownload(
   const now = new Date().toISOString();
   const event: QueueEvent = {
     message_id: crypto.randomUUID() as MessageId,
-    source: SOURCE,
+    source: webSource(req),
     event_name: EVENT_NAME,
 
-    // Fresh random per download — the proxy has no auth context, so
-    // anonymous_id has no continuity between requests. The analytics
-    // identity-model doc records this is the proxy convention.
-    anonymous_id: crypto.randomUUID() as AnonymousId,
+    // Caller-supplied id (CLI header / browser cookie) or a fresh random
+    // UUID — the proxy has no auth context of its own (resolveAnonymousId).
+    anonymous_id: resolveAnonymousId(req),
     user_id: null,
     group_id: null,
 
