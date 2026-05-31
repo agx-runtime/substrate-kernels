@@ -44,8 +44,11 @@ throughout ([ADR 0008](../adr/0008-kernel-capability-surface-vs-vmm-scope.md)).
   header capability advertisement ([ADR 0008](../adr/0008-kernel-capability-surface-vs-vmm-scope.md)).
 - **Filesystems / boot essentials:** `OVERLAY_FS`, `TMPFS`, `DEVTMPFS` (+ auto
   mount), `EXT4_FS` (the production rootfs is a sparse ext4 disk — substrate
-  architecture.md §1). `BLK_DEV_INITRD` is **unset** in base, matching the
-  base config.
+  architecture.md §1). `BLK_DEV_INITRD` is **enabled** in every variant — base
+  bundles still ship no baked initrd (the bundle's initrd section is absent), but
+  the kernel keeps the initrd boot path available so substrate can hand it one at
+  run time when needed (e.g. for early userspace before the ext4 rootfs is
+  mounted).
 - **CPU:** `HOTPLUG_CPU`; `NR_CPUS` bounded to substrate's max (value cited in the
   config comment).
 

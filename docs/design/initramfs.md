@@ -17,7 +17,7 @@ carries `initrd_offset`/`initrd_size` (zero when absent).
 
 | Detail | Convention | Our handling | Gate |
 |---|---|---|---|
-| **Base rootfs comes from the VMM, not the bundle** | base bundles ship no initrd | base bundle `initrd_offset/size = 0`; substrate supplies a sparse ext4 disk as rootfs via virtio-blk at run time (base leaves `BLK_DEV_INITRD` unset by default; CLAUDE.md §5b — never virtiofs as rootfs) | boot-smoke (base) |
+| **Base rootfs comes from the VMM, not the bundle** | base bundles ship no initrd | base bundle `initrd_offset/size = 0`; substrate supplies a sparse ext4 disk as rootfs via virtio-blk at run time (base enables `BLK_DEV_INITRD` so the kernel keeps the initrd boot path available, but ships none baked; CLAUDE.md §5b — never virtiofs as rootfs) | boot-smoke (base) |
 | **TEE needs early userspace before rootfs** — secrets/measurement must happen inside the encrypted domain before trusting a disk | bundles a prebuilt initrd blob into the bundle | TEE bundle vendors the prebuilt secret-retrieval initrd; packed via the bundle's initrd section ([ADR 0009](../adr/0009-confidential-compute-variants.md)) | TEE attestation/boot check |
 | **A vendored initrd blob is reproducibility-sensitive** — it must be pinned, not regenerated | ships a prebuilt blob | the TEE initrd is the prebuilt blob, **vendored + pinned by sha256** (not built by us — it ships prebuilt with no source), so the bundle stays byte-reproducible ([ADR 0005](../adr/0005-build-environment-and-reproducibility.md)) | `make repro-check` (TEE) |
 
@@ -26,10 +26,11 @@ carries `initrd_offset`/`initrd_size` (zero when absent).
 - **Base variant — no baked initramfs.** The bundle's initrd section is absent
   (`offset/size = 0`). substrate provides the boot filesystem at run time: a
   **sparse ext4 disk from the OCI pipeline** mounted as rootfs via virtio-blk. The
-  base config enables `EXT4_FS` and leaves `BLK_DEV_INITRD` **unset** (matching the
-  reference base — [kernel-config.md](kernel-config.md)). This keeps the bundle
-  small and lets substrate own the rootfs supply chain (CoW / dirty tracking /
-  snapshot chains — substrate architecture.md §1).
+  base config enables `EXT4_FS` and also enables `BLK_DEV_INITRD` so the kernel
+  keeps the initrd boot path available (the bundle ships none baked, but substrate
+  can hand the guest one at run time — [kernel-config.md](kernel-config.md)). This
+  keeps the bundle small and lets substrate own the rootfs supply chain (CoW /
+  dirty tracking / snapshot chains — substrate architecture.md §1).
 - **TEE variants — a vendored prebuilt initrd.** The sev/tdx bundles carry a small
   initrd whose init runs *inside* the encrypted/attested domain to retrieve secrets
   and complete measurement before any external disk is trusted. It ships

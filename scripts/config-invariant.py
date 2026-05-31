@@ -30,6 +30,7 @@ REQUIRED_COMMON = {
     "CONFIG_TMPFS": "y",
     "CONFIG_DEVTMPFS": "y",
     "CONFIG_TSI": "y",                 # substrate's net contract (transparent sockets)
+    "CONFIG_BLK_DEV_INITRD": "y",      # initrd path available in every variant
 }
 
 # Arch-specific required additions.
@@ -94,14 +95,10 @@ def main():
 
     forbidden_enabled = set(FORBIDDEN_COMMON)
     if args.variant in ("base", "windows"):
-        # Base/windows: no TEE, and no external initrd in base.
+        # Base/windows: no TEE symbols.
         forbidden_enabled.update(TEE_SYMBOLS)
-        forbidden_enabled.add("CONFIG_BLK_DEV_INITRD")
     else:
-        # sev/tdx: TEE symbols are required, and the baked initrd path is enabled.
-        for sym in ("CONFIG_BLK_DEV_INITRD",):
-            if values.get(sym) != "y":
-                errors.append(f"required {sym}=y for variant {args.variant}")
+        # sev/tdx: the variant's TEE symbol is required.
         tee_req = {"sev": "CONFIG_SEV_GUEST", "tdx": "CONFIG_INTEL_TDX_GUEST"}[args.variant]
         if values.get(tee_req) != "y":
             errors.append(f"required {tee_req}=y for variant {args.variant}")
