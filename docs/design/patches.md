@@ -123,6 +123,22 @@ ACPI hypervisor fixes; and the SEV/TDX series (quarantined,
 - **Provenance:** backport; cite each. **Keep only if still needed** against the
   pin (a fix already upstream in our pin is dropped).
 
+### kbuild: skip pahole `-j` when `KBUILD_BUILD_TIMESTAMP` is set (reproducibility)
+- **What:** wrap the `pahole-flags-y += -j` line in `scripts/Makefile.btf` (and
+  the pahole-1.26+ branch) in `ifndef KBUILD_BUILD_TIMESTAMP` so the `-j`
+  multithreading flag is dropped from BTF generation when the kernel is built
+  reproducibly.
+- **Why (contract):** pahole's parallel BTF generation produces
+  non-deterministic type_id allocation. The IDs land in the `.BTF` /
+  `.BTF_ids` ELF sections of vmlinux, so two identical builds of the **debug**
+  variant produce bundles differing by ~2.9 M bytes in the BTF region —
+  defeating `make repro-check` (CLAUDE.md §3 / [ADR 0005](../adr/0005-build-environment-and-reproducibility.md)).
+  Base doesn't carry `CONFIG_DEBUG_INFO_BTF=y` so it was unaffected; aarch64
+  debug happens to be deterministic at lower BTF type counts but x86 isn't.
+- **Provenance:** backport of an upstream proposal
+  ([LKML 2024-03 — "kbuild: disable pahole multi-threading on reproducible builds"](https://lore.kernel.org/lkml/20240306060818.9355-2-lukas.bulwahn@gmail.com/)).
+  Drop when an upstream fix lands in the pinned tree.
+
 ## Keep / drop / flag decisions
 
 | Area | Decision | Rationale |
@@ -135,6 +151,7 @@ ACPI hypervisor fixes; and the SEV/TDX series (quarantined,
 | virtio-rtc | **keep** | guest timekeeping; part of the fixed feature set |
 | x86 ACPI hypervisor fixes | **keep** | required for the 64-bit direct-boot x86 path with PCI off |
 | general syscall/mm fixes | **keep** (conditional) | guest-correctness; drop any already in the pin |
+| kbuild pahole-no-`-j` | **keep** | required for debug-variant repro-check; drop when upstream adopts the LKML fix |
 | **virtio-GPU / virtgpu** | **drop** | GPU is cut (CLAUDE.md §1; user: "just not GPUs") |
 | **virtio-CAN** | **drop** | outside substrate's device set and not requested; carried only if a concrete substrate consumer appears (would need an ADR) |
 | **TEE / SEV / TDX series** | **quarantine** | out of base; opt-in variant only ([ADR 0009](../adr/0009-confidential-compute-variants.md)) |
