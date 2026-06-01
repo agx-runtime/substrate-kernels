@@ -56,15 +56,17 @@ jobs:
             *) echo "::error::release tag '$tag' does not contain pinned kernel version '$KERNEL_VERSION'"; exit 1 ;;
           esac
 
-  # ---- build the release bundles (base × {x86_64, aarch64}) ---------------------
+  # ---- build the release bundles ({base, debug} × {x86_64, aarch64}) ------------
   build:
     needs: prepare
     strategy:
       fail-fast: true # never publish a partial release
       matrix:
         include:
-          - { arch: x86_64, rarch: amd64 }
-          - { arch: aarch64, rarch: arm64 }
+          - { arch: x86_64, rarch: amd64, variant: base }
+          - { arch: x86_64, rarch: amd64, variant: debug }
+          - { arch: aarch64, rarch: arm64, variant: base }
+          - { arch: aarch64, rarch: arm64, variant: debug }
     runs-on:
       - nscloud-ubuntu-24.04-${{ matrix.rarch }}-8x16-with-cache;github.run-id=${{ github.run_id }}
       - nscloud-cache-size-50gb
@@ -83,11 +85,11 @@ jobs:
       - name: Build the bundle (compile + pack) in the pinned container
         run: |
           docker run --rm -v "$PWD":/work -w /work substrate-kernel-build \
-            make all ARCH=${{ matrix.arch }} VARIANT=base
+            make all ARCH=${{ matrix.arch }} VARIANT=${{ matrix.variant }}
       - uses: actions/upload-artifact@v7
         with:
-          name: bundle-${{ matrix.arch }}
-          path: linux-${{ needs.prepare.outputs.version }}-base-${{ matrix.arch }}.kernel
+          name: bundle-${{ matrix.variant }}-${{ matrix.arch }}
+          path: linux-${{ needs.prepare.outputs.version }}-${{ matrix.variant }}-${{ matrix.arch }}.kernel
           if-no-files-found: error
 
   # ---- publish: GitHub Release + Cloudflare R2 ----------------------------------
@@ -107,7 +109,13 @@ jobs:
           pattern: bundle-*
           merge-multiple: true
       - name: Compute SHA256SUMS
-        run: sha256sum "linux-${VERSION}-base-x86_64.kernel" "linux-${VERSION}-base-aarch64.kernel" | tee SHA256SUMS
+        run: |
+          sha256sum \
+            "linux-${VERSION}-base-x86_64.kernel" \
+            "linux-${VERSION}-base-aarch64.kernel" \
+            "linux-${VERSION}-debug-x86_64.kernel" \
+            "linux-${VERSION}-debug-aarch64.kernel" \
+            | tee SHA256SUMS
       - name: Write release notes
         run: |
           set -euo pipefail
@@ -116,18 +124,28 @@ jobs:
           substrate-kernel \`$TAG\` — the pre-flattened \`.kernel\` bundles for substrate,
           built from the pinned **linux $VERSION** (sha256 \`$KERNEL_SHA256\`).
 
-          **Artifacts** (base variant): \`linux-$VERSION-base-x86_64.kernel\`,
-          \`linux-$VERSION-base-aarch64.kernel\`, and \`SHA256SUMS\`. Builds are
-          byte-reproducible, so each bundle's sha256 is a stable content identity.
+          **Artifacts:**
+          - \`linux-$VERSION-base-x86_64.kernel\` / \`linux-$VERSION-base-aarch64.kernel\`
+            — the production guest kernel (monolithic, virtio-only, no tracing).
+          - \`linux-$VERSION-debug-x86_64.kernel\` / \`linux-$VERSION-debug-aarch64.kernel\`
+            — same kernel + ftrace, kprobes, BPF tracing, BTF, DWARF5, kgdb (ADR 0013).
+          - \`SHA256SUMS\` — checksums for all four bundles.
 
-          Also published to Cloudflare R2, served at
+          Builds are byte-reproducible, so each bundle's sha256 is a stable content
+          identity. Also published to Cloudflare R2, served at
           https://kernels.substrate.loopholelabs.io/linux-$VERSION-base-x86_64.kernel
-          (and the aarch64 bundle + \`linux-$VERSION-SHA256SUMS\`).
+          (and the matching debug/aarch64 bundles + \`linux-$VERSION-SHA256SUMS\`).
           EOF
       - name: Create or update the GitHub Release
         run: |
           set -euo pipefail
-          assets=( "linux-${VERSION}-base-x86_64.kernel" "linux-${VERSION}-base-aarch64.kernel" SHA256SUMS )
+          assets=(
+            "linux-${VERSION}-base-x86_64.kernel"
+            "linux-${VERSION}-base-aarch64.kernel"
+            "linux-${VERSION}-debug-x86_64.kernel"
+            "linux-${VERSION}-debug-aarch64.kernel"
+            SHA256SUMS
+          )
           # Idempotent: if a prior run already created the release (e.g. the R2 mirror
           # failed afterwards), re-attach the assets instead of failing on collision.
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
@@ -141,20 +159,34 @@ jobs:
           fi
 
       # ---- mirror to Cloudflare R2 (skipped if secrets are unset) ---------------
-      - name: Upload x86_64 bundle to R2
+      - name: Upload base x86_64 bundle to R2
         if: ${{ env.CF_TOKEN != '' }}
         uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           command: r2 object put "${{ vars.R2_BUCKET }}/linux-${{ env.VERSION }}-base-x86_64.kernel" --file=linux-${{ env.VERSION }}-base-x86_64.kernel --remote
-      - name: Upload aarch64 bundle to R2
+      - name: Upload base aarch64 bundle to R2
         if: ${{ env.CF_TOKEN != '' }}
         uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           command: r2 object put "${{ vars.R2_BUCKET }}/linux-${{ env.VERSION }}-base-aarch64.kernel" --file=linux-${{ env.VERSION }}-base-aarch64.kernel --remote
+      - name: Upload debug x86_64 bundle to R2
+        if: ${{ env.CF_TOKEN != '' }}
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          command: r2 object put "${{ vars.R2_BUCKET }}/linux-${{ env.VERSION }}-debug-x86_64.kernel" --file=linux-${{ env.VERSION }}-debug-x86_64.kernel --remote
+      - name: Upload debug aarch64 bundle to R2
+        if: ${{ env.CF_TOKEN != '' }}
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          command: r2 object put "${{ vars.R2_BUCKET }}/linux-${{ env.VERSION }}-debug-aarch64.kernel" --file=linux-${{ env.VERSION }}-debug-aarch64.kernel --remote
       - name: Upload SHA256SUMS to R2
         if: ${{ env.CF_TOKEN != '' }}
         uses: cloudflare/wrangler-action@v4

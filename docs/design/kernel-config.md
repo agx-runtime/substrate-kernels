@@ -57,8 +57,24 @@ throughout ([ADR 0008](../adr/0008-kernel-capability-surface-vs-vmm-scope.md)).
 - **`MODULES=n`** — monolithic image.
 - **GPU/DRM/framebuffer** — cut (CLAUDE.md §1).
 - **USB, sound, most PCI, audit, legacy input** — a microVM never sees these.
+  `CONFIG_SOUND` is cut explicitly; with no sound device wired, the core would
+  initialize for nothing.
 - **GPU/CAN** — GPU is cut (CLAUDE.md §1); the virtio-CAN driver is dropped (no
   substrate consumer, [design/patches.md](patches.md)).
+- **Btrfs** — `CONFIG_BTRFS_FS=n`. The substrate rootfs is ext4 and
+  CoW/snapshotting is the VMM's responsibility (substrate architecture.md §1);
+  Btrfs adds image size + an `lib/raid6/` boot-time benchmark for no live
+  consumer.
+- **FAT / VFAT / MSDOS + NLS** — `CONFIG_FAT_FS=n` and `CONFIG_VFAT_FS=n`. No
+  FAT mount path exists (rootfs is ext4, optional mounts are virtio-fs); the
+  whole NLS codepage chain (CP437, …) is dropped with the FAT cuts.
+- **ftrace family** — `CONFIG_FTRACE=n` in base. Tracing/probing/BPF-events
+  lives in the **debug variant** ([ADR 0013](../adr/0013-debug-variant.md));
+  base stays curated-minimal so production boots do not pay the ~170 KB
+  dyn_ftrace tables + boot-time scan.
+- **CMA** — `CONFIG_CMA=n` (including on aarch64, where it had been set to
+  64 MiB). A virtio-only guest has no contiguous-DMA consumer; reserving the
+  pool is wasted guest RAM.
 
 **Per-cell deltas** (documented so duplication stays legible —
 [ADR 0006](../adr/0006-kernel-config-strategy.md) §5):
@@ -73,6 +89,26 @@ throughout ([ADR 0008](../adr/0008-kernel-capability-surface-vs-vmm-scope.md)).
   cells **forbid** them ([ADR 0009](../adr/0009-confidential-compute-variants.md));
   the windows cell adds Hyper-V enlightenments (`CONFIG_HYPERV*`) and is packed at
   4 KiB ([ADR 0002](../adr/0002-target-architectures.md)).
+- **base vs debug** (x86_64, aarch64 — [ADR 0013](../adr/0013-debug-variant.md)):
+  the debug cell adds tracing (`CONFIG_FTRACE`, `CONFIG_FUNCTION_TRACER`,
+  `CONFIG_FUNCTION_GRAPH_TRACER`, `CONFIG_DYNAMIC_FTRACE`,
+  `CONFIG_FTRACE_SYSCALLS`, `CONFIG_STACK_TRACER`), probes (`CONFIG_KPROBES`,
+  `CONFIG_KPROBE_EVENTS`, `CONFIG_UPROBE_EVENTS`; x86 also `CONFIG_OPTPROBES`),
+  BPF tracing (`CONFIG_BPF_EVENTS`, `CONFIG_BPF_JIT`,
+  `CONFIG_BPF_JIT_ALWAYS_ON`), and source-level debug
+  (`CONFIG_DEBUG_INFO_DWARF5`, `CONFIG_DEBUG_INFO_BTF`, `CONFIG_GDB_SCRIPTS`).
+  The cuts above (Btrfs, SOUND, FAT/NLS, CMA on aarch64) stay cut in debug.
+
+**eBPF + XDP guarantees** (every variant; the gate enforces them):
+
+- `CONFIG_BPF=y`, `CONFIG_BPF_SYSCALL=y`, `CONFIG_CGROUP_BPF=y` everywhere — so
+  BPF programs load and attach to cgroups in every variant.
+- `CONFIG_XDP_SOCKETS=y` in the variants that ship as the substrate guest
+  model (`base`, `debug`) — so userspace can attach XDP programs to
+  virtio-net. windows / sev / tdx do not require XDP.
+- `CONFIG_BPF_JIT=y` is in **debug** only — JIT depends on tracing surface
+  the base variant does not carry, and the BPF interpreter is sufficient for
+  base's expected workloads.
 
 The authoritative enabled/forbidden sets per cell live as the config-invariant
 gate's data ([testing/strategy.md](../testing/strategy.md)); this doc is the prose

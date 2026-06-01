@@ -21,7 +21,7 @@ export const ARCH_ORDER = ['x86_64', 'aarch64', 'riscv64'] as const;
 export type Arch = (typeof ARCH_ORDER)[number] | string;
 
 /** Display order — channels with fewer artifacts appear later. */
-export type Channel = 'base' | 'windows' | 'sev' | 'tdx' | string;
+export type Channel = 'base' | 'debug' | 'windows' | 'sev' | 'tdx' | string;
 
 /**
  * Channel-line label. Pinned LTS lines come from kernel.org's known LTS
@@ -170,13 +170,14 @@ function archRank(arch: string): number {
   return i === -1 ? ARCH_ORDER.length : i;
 }
 
-/** Channel display order — base first, then anything else alphabetically. */
+/** Channel display order — base first, debug right after, then anything else. */
 function channelRank(variant: string): number {
   if (variant === 'base') return 0;
-  if (variant === 'windows') return 1;
-  if (variant === 'sev') return 2;
-  if (variant === 'tdx') return 3;
-  return 4;
+  if (variant === 'debug') return 1;
+  if (variant === 'windows') return 2;
+  if (variant === 'sev') return 3;
+  if (variant === 'tdx') return 4;
+  return 5;
 }
 
 /** Bytes → human-readable (`12.4 MB`, `983 KB`). KiB-base. */

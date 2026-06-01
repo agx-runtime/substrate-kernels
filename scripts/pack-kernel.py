@@ -15,7 +15,7 @@ Header (little-endian, ADR 0003):
     4       4     format_version   u32, currently 1
     8       4     abi_version      u32, the bundle ABI version
     12      4     arch             u32: 1=x86_64, 2=aarch64, 3=riscv64
-    16      4     variant          u32: 0=base, 1=sev, 2=tdx, 3=windows
+    16      4     variant          u32: 0=base, 1=sev, 2=tdx, 3=windows, 4=debug
     20      4     page_size        u32: section alignment (65536, or 4096 for windows)
     24      8     load_addr        u64
     32      8     entry_addr       u64
@@ -54,7 +54,7 @@ HEADER_STRUCT = "<4sIIIIIQQQQQQQQQ"
 assert struct.calcsize(HEADER_STRUCT) == HEADER_SIZE
 
 ARCH_IDS = {"x86_64": 1, "aarch64": 2, "riscv64": 3}
-VARIANT_IDS = {"base": 0, "sev": 1, "tdx": 2, "windows": 3}
+VARIANT_IDS = {"base": 0, "sev": 1, "tdx": 2, "windows": 3, "debug": 4}
 
 
 def _import_elffile():

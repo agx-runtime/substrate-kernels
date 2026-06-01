@@ -65,6 +65,14 @@ describe('parseKernelKey — accepts', () => {
     const r = parseKernelKey('linux-6.12.91-windows-x86_64.kernel');
     expect(r).toMatchObject({ kind: 'kernel', variant: 'windows' });
   });
+  it('debug × x86_64 kernel', () => {
+    const r = parseKernelKey('linux-6.12.91-debug-x86_64.kernel');
+    expect(r).toMatchObject({ kind: 'kernel', variant: 'debug', arch: 'x86_64' });
+  });
+  it('debug × aarch64 kernel', () => {
+    const r = parseKernelKey('linux-6.12.91-debug-aarch64.kernel');
+    expect(r).toMatchObject({ kind: 'kernel', variant: 'debug', arch: 'aarch64' });
+  });
   it('SHA256SUMS', () => {
     expect(parseKernelKey('linux-6.12.91-SHA256SUMS')).toEqual({
       kind: 'sums',
@@ -196,6 +204,33 @@ describe('groupByVersionLine', () => {
   it('handles a kernel without a matching sums file', () => {
     const out = groupByVersionLine([k({})], []);
     expect(out[0]!.versions[0]!.sums).toBeNull();
+  });
+
+  it('orders base before debug for the same (version, arch)', () => {
+    const out = groupByVersionLine(
+      [
+        k({ variant: 'debug', key: 'linux-6.12.91-debug-x86_64.kernel' }),
+        k({ variant: 'base' }),
+        k({
+          variant: 'debug',
+          arch: 'aarch64',
+          key: 'linux-6.12.91-debug-aarch64.kernel',
+        }),
+        k({
+          variant: 'base',
+          arch: 'aarch64',
+          key: 'linux-6.12.91-base-aarch64.kernel',
+        }),
+      ],
+      [],
+    );
+    const artifacts = out[0]!.versions[0]!.artifacts;
+    expect(artifacts.map((a) => `${a.variant}-${a.arch}`)).toEqual([
+      'base-x86_64',
+      'base-aarch64',
+      'debug-x86_64',
+      'debug-aarch64',
+    ]);
   });
 });
 

@@ -31,6 +31,10 @@ REQUIRED_COMMON = {
     "CONFIG_DEVTMPFS": "y",
     "CONFIG_TSI": "y",                 # substrate's net contract (transparent sockets)
     "CONFIG_BLK_DEV_INITRD": "y",      # initrd path available in every variant
+    # eBPF: must work in every guest (XDP, cgroup/TC programs, BPF syscall).
+    "CONFIG_BPF": "y",
+    "CONFIG_BPF_SYSCALL": "y",
+    "CONFIG_CGROUP_BPF": "y",
 }
 
 # Arch-specific required additions.
@@ -40,16 +44,33 @@ REQUIRED_ARCH = {
     "riscv64": {},  # carried, not CI-gated; only the common set is asserted
 }
 
-# Forbidden anywhere: monolithic image (no modules), cut driver classes.
-FORBIDDEN_COMMON = {
-    "CONFIG_MODULES",     # monolithic — must be unset (=y forbidden)
-    "CONFIG_CAN",         # dropped (no substrate consumer)
-    "CONFIG_DRM",         # GPU cut
-    "CONFIG_VIRTIO_GPU",  # GPU cut
-}
+# Variants that boot the substrate guest model directly: must carry XDP_SOCKETS
+# (`AF_XDP`) so guest userspace can attach XDP programs to virtio-net.
+# windows/sev/tdx are carried/special-purpose and out of scope for XDP.
+XDP_VARIANTS = {"base", "debug"}
 
-# TEE symbols: forbidden in base/windows, required in sev/tdx.
+# Forbidden anywhere: monolithic image (no modules), cut driver classes,
+# microVM-irrelevant subsystems (kernel-config.md).
+FORBIDDEN_COMMON = {
+    "CONFIG_MODULES",          # monolithic — must be unset (=y forbidden)
+    "CONFIG_CAN",              # dropped (no substrate consumer)
+    "CONFIG_DRM",              # GPU cut
+    "CONFIG_VIRTIO_GPU",       # GPU cut
+    "CONFIG_SOUND",            # no sound device in the substrate device set
+    "CONFIG_BTRFS_FS",         # rootfs is ext4; snapshotting is the VMM's job
+    "CONFIG_FAT_FS",           # no FAT mount path (drops the VFAT/MSDOS/NLS chain)
+}
+# We enforce only the master toggle of each cut subsystem. Sub-options that depend
+# on the master (e.g. CONFIG_SND_*, CONFIG_BTRFS_FS_*, CONFIG_VFAT_FS,
+# CONFIG_FUNCTION_TRACER) may remain in the .config as harmless orphans after
+# olddefconfig — kbuild compiles them as 'n' because the master is 'n'.
+
+# TEE symbols: forbidden in base/debug/windows, required in sev/tdx.
 TEE_SYMBOLS = ("CONFIG_SEV_GUEST", "CONFIG_INTEL_TDX_GUEST", "CONFIG_CMDLINE_SECRET")
+
+# Master tracing toggle: forbidden in base/windows/sev/tdx (curated-minimal),
+# required in the debug variant (the whole point of that variant).
+TRACING_MASTER = "CONFIG_FTRACE"
 
 
 def parse_config(path):
@@ -74,7 +95,7 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--arch", required=True, choices=("x86_64", "aarch64", "riscv64"))
     p.add_argument("--variant", required=True,
-                   choices=("base", "sev", "tdx", "windows"))
+                   choices=("base", "debug", "sev", "tdx", "windows"))
     p.add_argument("--config", required=True)
     args = p.parse_args()
 
@@ -87,6 +108,20 @@ def main():
     if args.variant != "windows":
         required.update(REQUIRED_ARCH.get(args.arch, {}))
 
+    # XDP_SOCKETS required for variants that ship as the substrate guest model.
+    if args.variant in XDP_VARIANTS:
+        required["CONFIG_XDP_SOCKETS"] = "y"
+
+    # Debug variant carries the tracing/debugging surface; require the master
+    # tracing toggle + the specific tracers + kprobes + bpf_events explicitly so the
+    # variant cannot silently lose its raison d'être.
+    if args.variant == "debug":
+        required[TRACING_MASTER] = "y"
+        required["CONFIG_FUNCTION_TRACER"] = "y"
+        required["CONFIG_KPROBES"] = "y"
+        required["CONFIG_PERF_EVENTS"] = "y"
+        required["CONFIG_BPF_EVENTS"] = "y"
+
     for name, want in required.items():
         got = values.get(name)
         if got != want:
@@ -94,10 +129,15 @@ def main():
                           f"{name+'='+got if got else 'UNSET'}")
 
     forbidden_enabled = set(FORBIDDEN_COMMON)
-    if args.variant in ("base", "windows"):
-        # Base/windows: no TEE symbols.
+    if args.variant in ("base", "debug", "windows"):
+        # No TEE outside the sev/tdx variants.
         forbidden_enabled.update(TEE_SYMBOLS)
-    else:
+
+    # Master tracing toggle is forbidden everywhere except the debug variant.
+    if args.variant != "debug":
+        forbidden_enabled.add(TRACING_MASTER)
+
+    if args.variant in ("sev", "tdx"):
         # sev/tdx: the variant's TEE symbol is required.
         tee_req = {"sev": "CONFIG_SEV_GUEST", "tdx": "CONFIG_INTEL_TDX_GUEST"}[args.variant]
         if values.get(tee_req) != "y":

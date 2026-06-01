@@ -109,14 +109,15 @@ The artifact name is `linux-<version>-<variant>-<arch>.kernel` (e.g.
 | | x86_64 | aarch64 | riscv64 |
 |---|---|---|---|
 | **base** | ✅ kernel binary = `vmlinux` (ELF); packer flattens PT_LOAD | ✅ kernel binary = `Image`; packer takes it raw | ✅ `Image`; raw (carried, not CI-gated) |
+| **debug** | ✅ base + ftrace/kprobes/PERF/BPF_EVENTS/BTF/DWARF5/KGDB ([ADR 0013](adr/0013-debug-variant.md)) | ✅ same set of additions | — (no substrate consumer) |
 | **sev** (AMD SEV-SNP) | ✅ opt-in, deferred ([ADR 0009](adr/0009-confidential-compute-variants.md)); adds the TEE series + vendored qboot + initrd blobs | — (TEE is x86-only) | — |
 | **tdx** (Intel TDX) | ✅ opt-in, deferred ([ADR 0009](adr/0009-confidential-compute-variants.md)) | — | — |
 | **windows** (WHP) | ✅ Hyper-V config; packed at 4 KiB (carried, not CI-gated) | — | — |
 
-**CI / boot-smoke scope:** x86_64 + aarch64 only (substrate's hosts). riscv64 and
-the windows variant are carried for completeness and are
-buildable + golden-tested, but are not substrate boot targets
-([ADR 0002](adr/0002-target-architectures.md)).
+**CI / boot-smoke scope:** x86_64 + aarch64 for both **base** and **debug**
+([ADR 0013](adr/0013-debug-variant.md)). riscv64 and the windows variant are
+carried for completeness and are buildable + golden-tested, but are not
+substrate boot targets ([ADR 0002](adr/0002-target-architectures.md)).
 
 ## 5. Capability surface vs substrate's device scope
 
@@ -173,7 +174,12 @@ next. Steps are named by deliverable, never numbered in source or other docs.
    each exercised by boot-smoke as substrate wires the matching device.
 6. **Reproducibility hardening** — fixed build metadata, the `make repro-check`
    byte-identity gate, and the drift lane for pin bumps.
-7. **The confidential-compute variants (deferred)** — the quarantined TEE patches +
+7. **The debug variant** — a second cell per (x86_64, aarch64) that ships the
+   base kernel + ftrace, kprobes, BPF tracing, DWARF5/BTF debug info, and kgdb,
+   so debugging the substrate guest does not require a custom build. CI gates
+   the variant the same way base is gated; release.yml publishes the debug
+   bundles alongside base ([ADR 0013](adr/0013-debug-variant.md)).
+8. **The confidential-compute variants (deferred)** — the quarantined TEE patches +
    sev/tdx configs for x86_64, opt-in and never in a base build; the vendored
    firmware/initrd blobs are wired later
    ([ADR 0009](adr/0009-confidential-compute-variants.md)).
@@ -193,6 +199,9 @@ the ADR for the *why*.
 - The capability-surface vs VMM-device-scope boundary — [ADR 0008](adr/0008-kernel-capability-surface-vs-vmm-scope.md).
 - The confidential-compute variants (TEE/SEV/TDX, opt-in, quarantined) — [ADR 0009](adr/0009-confidential-compute-variants.md).
 - The auto-loaded documentation manifest — [ADR 0010](adr/0010-auto-loaded-doc-context.md).
+- The download proxy (CF Worker over R2, one analytics event per download) — [ADR 0011](adr/0011-download-proxy-with-analytics.md).
+- Listing-page web analytics + download correlation — [ADR 0012](adr/0012-listing-page-web-analytics-and-correlation.md).
+- The debug variant (base + ftrace + kprobes + BPF tracing + BTF + DWARF5 + kgdb) — [ADR 0013](adr/0013-debug-variant.md).
 
 **The design-doc discipline (§7 / CLAUDE.md §1):** every build component carries a
 design document under [`docs/design/`](design/) that records

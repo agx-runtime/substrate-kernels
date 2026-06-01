@@ -61,8 +61,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { arch: x86_64, rarch: amd64 }
-          - { arch: aarch64, rarch: arm64 }
+          - { arch: x86_64, rarch: amd64, variant: base }
+          - { arch: x86_64, rarch: amd64, variant: debug }
+          - { arch: aarch64, rarch: arm64, variant: base }
+          - { arch: aarch64, rarch: arm64, variant: debug }
     runs-on:
       - nscloud-ubuntu-24.04-${{ matrix.rarch }}-8x16-with-cache;github.run-id=${{ github.run_id }}
       - nscloud-cache-size-50gb
@@ -81,7 +83,7 @@ jobs:
       - name: configure (olddefconfig + config-invariant), no compile
         run: |
           docker run --rm -v "$PWD":/work -w /work substrate-kernel-build \
-            make configured ARCH=${{ matrix.arch }} VARIANT=base
+            make configured ARCH=${{ matrix.arch }} VARIANT=${{ matrix.variant }}
 
   # ---- full build → the .kernel bundle ------------------------------------------
   build:
@@ -89,8 +91,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { arch: x86_64, rarch: amd64 }
-          - { arch: aarch64, rarch: arm64 }
+          - { arch: x86_64, rarch: amd64, variant: base }
+          - { arch: x86_64, rarch: amd64, variant: debug }
+          - { arch: aarch64, rarch: arm64, variant: base }
+          - { arch: aarch64, rarch: arm64, variant: debug }
     runs-on:
       - nscloud-ubuntu-24.04-${{ matrix.rarch }}-8x16-with-cache;github.run-id=${{ github.run_id }}
       - nscloud-cache-size-50gb
@@ -109,19 +113,19 @@ jobs:
       - name: Build the bundle (compile + pack) in the pinned container
         run: |
           docker run --rm -v "$PWD":/work -w /work substrate-kernel-build \
-            make all ARCH=${{ matrix.arch }} VARIANT=base
+            make all ARCH=${{ matrix.arch }} VARIANT=${{ matrix.variant }}
       - name: Stage the kernel binary for the boot-smoke lane
         run: |
           if [ "${{ matrix.arch }}" = "x86_64" ]; then
-            cp build/base-x86_64/linux-*/vmlinux kernel-binary
+            cp build/${{ matrix.variant }}-x86_64/linux-*/vmlinux kernel-binary
           else
-            cp build/base-aarch64/linux-*/arch/arm64/boot/Image kernel-binary
+            cp build/${{ matrix.variant }}-aarch64/linux-*/arch/arm64/boot/Image kernel-binary
           fi
       - uses: actions/upload-artifact@v7
         with:
-          name: bundle-${{ matrix.arch }}
+          name: bundle-${{ matrix.variant }}-${{ matrix.arch }}
           path: |
-            linux-*-base-${{ matrix.arch }}.kernel
+            linux-*-${{ matrix.variant }}-${{ matrix.arch }}.kernel
             kernel-binary
           if-no-files-found: error
 
@@ -134,8 +138,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { arch: x86_64, rarch: amd64 }
-          - { arch: aarch64, rarch: arm64 }
+          - { arch: x86_64, rarch: amd64, variant: base }
+          - { arch: x86_64, rarch: amd64, variant: debug }
+          - { arch: aarch64, rarch: arm64, variant: base }
+          - { arch: aarch64, rarch: arm64, variant: debug }
     runs-on:
       - nscloud-ubuntu-24.04-${{ matrix.rarch }}-8x16-with-cache;github.run-id=${{ github.run_id }}
       - nscloud-cache-size-50gb
@@ -144,7 +150,7 @@ jobs:
       - uses: actions/checkout@v6
       - uses: actions/download-artifact@v8
         with:
-          name: bundle-${{ matrix.arch }}
+          name: bundle-${{ matrix.variant }}-${{ matrix.arch }}
       - name: Install QEMU
         run: sudo apt-get update && sudo apt-get install -y qemu-system-x86 qemu-system-arm
       - name: Boot the kernel under QEMU
@@ -159,8 +165,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { arch: x86_64, rarch: amd64 }
-          - { arch: aarch64, rarch: arm64 }
+          - { arch: x86_64, rarch: amd64, variant: base }
+          - { arch: x86_64, rarch: amd64, variant: debug }
+          - { arch: aarch64, rarch: arm64, variant: base }
+          - { arch: aarch64, rarch: arm64, variant: debug }
     runs-on:
       - nscloud-ubuntu-24.04-${{ matrix.rarch }}-8x16-with-cache;github.run-id=${{ github.run_id }}
       - nscloud-cache-size-50gb
@@ -179,4 +187,4 @@ jobs:
       - name: Assert byte-identical rebuild
         run: |
           docker run --rm -v "$PWD":/work -w /work substrate-kernel-build \
-            make repro-check ARCH=${{ matrix.arch }} VARIANT=base
+            make repro-check ARCH=${{ matrix.arch }} VARIANT=${{ matrix.variant }}
