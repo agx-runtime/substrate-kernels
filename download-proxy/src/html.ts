@@ -49,7 +49,7 @@ export function renderListingHtml(
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Substrate — Kernels</title>
-<meta name="description" content="Pre-built Linux kernel bundles for the Substrate hypervisor, served from Cloudflare R2." />
+<meta name="description" content="Pre-built Linux kernel bundles for the Substrate hypervisor — monolithic, virtio-only, reproducible." />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
@@ -155,7 +155,10 @@ function renderFeatured(featured: VersionGroup | null): string {
       <p>No kernel bundles in this bucket yet.</p>
     </section>`;
   }
-  const archButtons = featured.artifacts
+  // Headline card highlights the production kernel only; debug bundles are
+  // for developers and live in the table below.
+  const baseArtifacts = featured.artifacts.filter((a) => a.variant === 'base');
+  const archButtons = baseArtifacts
     .map(
       (a, i) => `<a class="dl ${i === 0 ? 'primary' : ''}" href="/${esc(a.key)}" download>
       ${ICONS.download}
@@ -163,8 +166,8 @@ function renderFeatured(featured: VersionGroup | null): string {
     </a>`,
     )
     .join('');
-  const releaseDate = featured.artifacts[0]?.uploaded
-    ? humanDate(featured.artifacts[0].uploaded)
+  const releaseDate = baseArtifacts[0]?.uploaded
+    ? humanDate(baseArtifacts[0].uploaded)
     : '—';
   const sumsUrl = featured.sums ? `/${featured.sums.key}` : null;
   return `<section class="featured">
@@ -176,7 +179,7 @@ function renderFeatured(featured: VersionGroup | null): string {
       </div>
       <p class="ftBody">The latest mainline Linux kernel, pre-built and tuned for Substrate microVMs — monolithic, virtio-only, and reproducible. Pick an architecture below to download.</p>
       <div class="ftMeta">
-        ${featured.artifacts
+        ${baseArtifacts
           .map(
             (a) =>
               `<span class="kv"><span class="k">${esc(a.arch)}:</span><span class="v mono">${esc(shortHash(a.etag))}</span></span>`,
