@@ -556,9 +556,12 @@ footer .fright { font-size: 12px; color: var(--muted); }
   .tbL, .tbR { width: 100%; justify-content: space-between; }
   .search { width: 100%; }
   /* Keep the featured card compact when it stacks: tighter rhythm and drop
-     the per-arch hash row (recoverable from the table / the artifact URL). */
-  .featured { flex-direction: column; align-items: stretch; gap: 14px; }
-  .ftL { gap: 8px; }
+     the per-arch hash row (recoverable from the table / the artifact URL).
+     Reset .ftL's flex-basis (480px) to auto — in column mode that basis would
+     become a height-basis, forcing the card hundreds of px tall and pushing
+     .ftR to the bottom via the outer `justify-content: space-between`. */
+  .featured { flex-direction: column; align-items: stretch; justify-content: flex-start; gap: 14px; }
+  .ftL { flex: 0 0 auto; gap: 8px; }
   .ftMeta { display: none; }
   .ftR { align-items: stretch; gap: 10px; }
   .ftNav { justify-content: space-between; width: 100%; flex-wrap: wrap; }
