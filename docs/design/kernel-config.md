@@ -75,6 +75,22 @@ throughout ([ADR 0008](../adr/0008-kernel-capability-surface-vs-vmm-scope.md)).
 - **CMA** — `CONFIG_CMA=n` (including on aarch64, where it had been set to
   64 MiB). A virtio-only guest has no contiguous-DMA consumer; reserving the
   pool is wasted guest RAM.
+- **EROFS** — `CONFIG_EROFS_FS=n` everywhere. The substrate rootfs is ext4;
+  EROFS adds an unused read-only-fs codepath (including the optional zip/zstd
+  decompressors when `EROFS_FS_ZIP=y`).
+- **CRYPTO_USER family** — `CONFIG_CRYPTO_USER=n` and the entire
+  `CONFIG_CRYPTO_USER_API*` family (hash, skcipher, rng, aead, the obsolete
+  algos toggle). The netlink crypto management surface and the AF_ALG
+  userspace crypto API have no substrate-guest consumer; algorithms are still
+  available to the kernel via the in-kernel crypto API.
+- **aarch64 board ballast** — `CONFIG_I2C`, the platform-specific GPIO
+  drivers (`GPIO_AGGREGATOR`/`PCA*`/`MAX*`/etc., keeping only `GPIOLIB`,
+  `GPIOLIB_IRQCHIP`, `GPIO_PL061` for the gpio-keys restart-button path),
+  `CONFIG_MTD` + the NAND/CFI chain, the `CONFIG_MFD_*` PMIC driver tree,
+  `CONFIG_RMI4_*` (Synaptics touchpad), and the `CONFIG_BATTERY_*` charger
+  drivers. A microVM guest has no bus controllers, flash, PMIC, touchpad, or
+  battery; these are pure inherited board-config drift. Same set applies to
+  riscv64 base.
 
 **Per-cell deltas** (documented so duplication stays legible —
 [ADR 0006](../adr/0006-kernel-config-strategy.md) §5):
@@ -109,6 +125,14 @@ throughout ([ADR 0008](../adr/0008-kernel-capability-surface-vs-vmm-scope.md)).
 - `CONFIG_BPF_JIT=y` is in **debug** only — JIT depends on tracing surface
   the base variant does not carry, and the BPF interpreter is sufficient for
   base's expected workloads.
+
+**BPF parity additions** (every variant): `CONFIG_BPF_PRELOAD=y` and
+`CONFIG_BPF_PRELOAD_UMD=y` (kernel BPF program preloading via the userspace
+helper), `CONFIG_BPF_STREAM_PARSER=y` (BPF sockmap stream parser),
+`CONFIG_BPF_UNPRIV_DEFAULT_OFF=y` (hardening: defaults
+`kernel.unprivileged_bpf_disabled=1`). These match Firecracker's guest-kernel
+posture. `CONFIG_BPFILTER` was removed from upstream Linux before our 6.12
+pin so it is no longer a valid symbol.
 
 The authoritative enabled/forbidden sets per cell live as the config-invariant
 gate's data ([testing/strategy.md](../testing/strategy.md)); this doc is the prose
