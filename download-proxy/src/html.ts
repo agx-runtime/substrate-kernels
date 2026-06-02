@@ -559,7 +559,7 @@ footer .fright { font-size: 12px; color: var(--muted); }
      the per-arch hash row (recoverable from the table / the artifact URL).
      Reset .ftL's flex-basis (480px) to auto — in column mode that basis would
      become a height-basis, forcing the card hundreds of px tall and pushing
-     .ftR to the bottom via the outer `justify-content: space-between`. */
+     .ftR to the bottom via the outer justify-content: space-between. */
   .featured { flex-direction: column; align-items: stretch; justify-content: flex-start; gap: 14px; }
   .ftL { flex: 0 0 auto; gap: 8px; }
   .ftMeta { display: none; }
