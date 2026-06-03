@@ -32,14 +32,18 @@ binding = "EVENTS_QUEUE"
 queue = "analytics-events"
 
 # Listing-page analytics (docs/adr/0012). `GET /` loads the RudderStack SDK
-# pointed at this data plane; per-host write keys map each domain to its
-# `source = WEB:<HOSTNAME UPPERCASE>` on the analytics side. Write keys are
-# NOT secrets (analytics ADR 0010), so they live in [vars]. The SDK is
-# injected only when a write key is configured for the request host — until
-# ANALYTICS_WRITE_KEYS is set, the page renders without the SDK (graceful).
-# Dependency: the analytics ingest (data.agx.so) must allow CORS from these
-# hostnames and have a web write key per domain provisioned in its WRITE_KEYS
-# KV (each record: { source: "WEB:KERNELS.AGX.SO", enabled: true }).
+# via the same-origin reverse proxy at /_data/* on this worker. The SDK
+# posts events to /_data/v1/<type>; the worker forwards Worker-to-Worker to
+# ${ANALYTICS_DATA_PLANE_URL}/v1/batch. Per-host write keys map each domain
+# to its `source = WEB:<HOSTNAME UPPERCASE>` on the analytics side. Write
+# keys are NOT secrets (analytics ADR 0010), so they live in [vars]. The SDK
+# is injected only when a write key is configured for the request host —
+# until ANALYTICS_WRITE_KEYS is set, the page renders without the SDK
+# (graceful). The only analytics-side requirement now is the per-domain web
+# write key in the WRITE_KEYS KV (each: `{ source: "WEB:KERNELS.AGX.SO",
+# enabled: true }`); the CORS contract on data.agx.so is no longer
+# load-bearing for this page since nothing on it talks to data.agx.so
+# directly.
 [vars]
 ANALYTICS_DATA_PLANE_URL = "https://data.agx.so"
 # Per-host web write keys (not secrets — analytics ADR 0010). Each key's

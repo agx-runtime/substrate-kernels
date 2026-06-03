@@ -98,19 +98,36 @@ Two facts shape the design:
      ingest; our writeKeys exist only in our KV. Synthesizing the response on
      our side bypasses the dependency entirely.
 
-   Routes (all GET, served by `download-proxy/src/sdk-proxy.ts`):
-   | Path | Behavior |
-   |---|---|
-   | `/_data/<modern\|legacy>/client.min.js` | proxies `cdn.rudderlabs.com/<pinned>/<build>/rsa.min.js` (filename renamed in our URL) |
-   | `/_data/<modern\|legacy>/p/<file>` | proxies `cdn.rudderlabs.com/<pinned>/<build>/plugins/<file>` (lazy plugin chunks) |
-   | `/_data/sourceConfig/?writeKey=<k>` | synthesized JSON; `?writeKey` must be one of the configured per-host write keys |
+   Routes served by `download-proxy/src/sdk-proxy.ts`:
+   | Method | Path | Behavior |
+   |---|---|---|
+   | GET | `/_data/<modern\|legacy>/client.min.js` | proxies `cdn.rudderlabs.com/<pinned>/<build>/rsa.min.js` (filename renamed in our URL) |
+   | GET | `/_data/<modern\|legacy>/p/<file>` | proxies `cdn.rudderlabs.com/<pinned>/<build>/plugins/<file>` (lazy plugin chunks) |
+   | GET | `/_data/sourceConfig/?writeKey=<k>` | synthesized JSON; `?writeKey` must be one of the configured per-host write keys |
+   | POST | `/_data/v1/<type>` | event ingest forwarder — see below |
 
    The SDK loader is modified to set `sdkBaseUrl = window.location.origin +
    "/_data"`, `sdkName = "client.min.js"`, and pass `configUrl`,
    `pluginsSDKBaseURL`, `destSDKBaseURL` load options pointing at the same
-   prefix. The pinned SDK version (currently **3.31.2**) is a single constant
-   in `sdk-proxy.ts`; bumping it is a reviewed change re-validated against the
-   `isValidSourceConfig` shape.
+   prefix. **`dataPlaneUrl` is also set to `window.location.origin + "/_data"`
+   so every event POST stays first-party.** The pinned SDK version (currently
+   **3.31.2**) is a single constant in `sdk-proxy.ts`; bumping it is a reviewed
+   change re-validated against the `isValidSourceConfig` shape.
+
+   The `/_data/v1/<type>` POST route exists because the SDK's default
+   `XhrQueue` plugin builds `${dataPlaneUrl}/v1/${type}` per event (where
+   `type` ∈ `{track, page, identify, group}`), not `/v1/batch`. Our analytics
+   ingest only accepts `/v1/batch`, and only sets CORS for that path — so the
+   stock `dataPlaneUrl=https://data.agx.so` configuration would: (a) get
+   CORS-blocked on the preflight to `data.agx.so/v1/page`, and (b) 404 on
+   the path even if CORS passed. The forwarder rewrites every `/_data/v1/*`
+   POST to `${ANALYTICS_DATA_PLANE_URL}/v1/batch` server-side (the wire
+   format accepts both the single-message and the wrapped-batch shape per
+   `wire-format.md`), preserves the `Authorization`, `Content-Type`, and
+   `CF-Connecting-IP` headers (so writeKey auth, body parsing, and the
+   analytics per-IP rate limit + `ip_*` enrichment all see what they
+   expect), and propagates the upstream status verbatim so the SDK's
+   `RetryQueue` plugin can do its job on 5xx / network failures.
 
    The synthesized source-config body mirrors the SDK team's own mock
    (`rudder-sdk-js/examples/utils/mock-servers/control-plane.js`) with
@@ -127,13 +144,14 @@ Two facts shape the design:
    the fly. Not in current EasyPrivacy; flagged as a future hardening step if
    filter lists ever add a `rsa-plugins` rule.
 
-7. **The remaining analytics-side dependency.** Only `/v1/batch` itself stays
-   off-origin (on `data.agx.so`). The analytics ingest must (a) allow CORS
-   from these hostnames (commit `012c7c5`, satisfied), and (b) have a web
-   write key per domain in its `WRITE_KEYS` KV mapped to `WEB:<HOST>`. The
-   reverse proxy at `/_data/` is self-contained; no analytics-side change is
-   required to host or serve it. If `data.agx.so` is ever added to a filter
-   list, we can proxy `/v1/batch` through `/_data/v1/batch` as a follow-up.
+7. **The remaining analytics-side dependency.** None of `data.agx.so`
+   appears on the page; events ride the same-origin `/_data/v1/<type>` route
+   and the worker forwards to `${ANALYTICS_DATA_PLANE_URL}/v1/batch`
+   server-side (no CORS — Worker-to-Worker fetch, no browser involvement).
+   The analytics ingest only needs (a) a web write key per domain in its
+   `WRITE_KEYS` KV mapped to `WEB:<HOST>`. The earlier CORS contract
+   (commit `012c7c5`) is no longer load-bearing for this page, though it
+   remains useful for other consumers.
 
 ## Consequences
 

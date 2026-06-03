@@ -54,15 +54,11 @@ export default {
 
     // First-party RudderStack SDK reverse proxy (docs/adr/0012). Routed
     // BEFORE the R2 fall-through so an unknown `/_data/...` shape returns
-    // 404 instead of trying to read an R2 key. No analytics emit (the proxy
-    // routes are infrastructure, not kernel downloads).
+    // 404 instead of trying to read an R2 key. The reverse-proxy itself
+    // enforces method per route (GET for the CDN/sourceConfig routes,
+    // POST for the /_data/v1/* event-ingest forwarder). No analytics emit
+    // (the proxy routes are infrastructure, not kernel downloads).
     if (isSdkProxyPath(url.pathname)) {
-      if (request.method !== 'GET' && request.method !== 'HEAD') {
-        return new Response('Method Not Allowed', {
-          status: 405,
-          headers: { Allow: 'GET, HEAD' },
-        });
-      }
       const sdk = await serveSdkProxy(env, request);
       return sdk ?? new Response('Not found', { status: 404 });
     }

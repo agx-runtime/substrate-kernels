@@ -364,10 +364,13 @@ describe('download-proxy fetch', () => {
       await waitOnExecutionContext(ctx);
 
       const body = await res.text();
-      // The loader is overridden to point at our origin under /_data/.
+      // The loader is overridden to point at our origin under /_data/. The
+      // data plane URL passed to load() is also same-origin — POSTs ride
+      // /_data/v1/<type>, which the worker forwards to
+      // ANALYTICS_DATA_PLANE_URL/v1/batch upstream.
       expect(body).toContain('"/_data"');
       expect(body).toContain('"client.min.js"');
-      expect(body).toContain('rudderanalytics.load("test-web-key","https://data.agx.so",');
+      expect(body).toContain('rudderanalytics.load("test-web-key",origin+"/_data",');
       expect(body).toContain('configUrl:origin+"/_data"');
       expect(body).toContain('pluginsSDKBaseURL');
       expect(body).toContain('lockPluginsVersion:true');
@@ -377,6 +380,9 @@ describe('download-proxy fetch', () => {
       expect(body).not.toContain('cdn.rudderlabs.com');
       expect(body).not.toContain('api.rudderstack.com');
       expect(body).not.toContain('rsa.min.js');
+      // The data plane host does NOT appear in the page HTML either —
+      // events go via the same-origin /_data/v1/<type> proxy.
+      expect(body).not.toContain('data.agx.so');
     });
 
     it('GET / does NOT inject the SDK for a host with no mapped write key', async () => {
@@ -582,6 +588,120 @@ describe('download-proxy fetch', () => {
 
       expect(res.status).toBe(405);
       expect(res.headers.get('Allow')).toBe('GET, HEAD');
+    });
+
+    it('POST /_data/v1/page → rewrites to <dataPlane>/v1/batch upstream', async () => {
+      const fetchSpy = vi
+        .spyOn(globalThis, 'fetch')
+        .mockResolvedValueOnce(new Response(null, { status: 200 }));
+      try {
+        const eventBody = JSON.stringify({
+          type: 'page',
+          messageId: 'm-1',
+          anonymousId: 'a-1',
+          properties: { url: 'https://kernels.agx.so/' },
+        });
+        const envWithDataPlane: Env = {
+          ...envWithKeys,
+          ANALYTICS_DATA_PLANE_URL: 'https://data.agx.so',
+        };
+        const req = new Request('https://kernels.agx.so/_data/v1/page', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Basic ${btoa(`${WRITE_KEY}:`)}`,
+            'CF-Connecting-IP': '203.0.113.42',
+          },
+          body: eventBody,
+        });
+        const ctx = createExecutionContext();
+        const res = await worker.fetch(req, envWithDataPlane, ctx);
+        await waitOnExecutionContext(ctx);
+
+        expect(fetchSpy).toHaveBeenCalledTimes(1);
+        const [upstreamUrl, upstreamInit] = fetchSpy.mock.calls[0] as [string, RequestInit];
+        // Path rewritten to /v1/batch upstream, host is the configured data plane.
+        expect(upstreamUrl).toBe('https://data.agx.so/v1/batch');
+        expect(upstreamInit.method).toBe('POST');
+        // Auth, content-type, and the end-user IP are forwarded so the
+        // analytics ingest's writeKey lookup, body parser, and per-IP rate
+        // limit + ip_* enrichment all see what they expect.
+        const fwdHeaders = new Headers(upstreamInit.headers);
+        expect(fwdHeaders.get('Authorization')).toBe(`Basic ${btoa(`${WRITE_KEY}:`)}`);
+        expect(fwdHeaders.get('Content-Type')).toBe('application/json');
+        expect(fwdHeaders.get('CF-Connecting-IP')).toBe('203.0.113.42');
+        expect(res.status).toBe(200);
+      } finally {
+        fetchSpy.mockRestore();
+      }
+    });
+
+    it('POST /_data/v1/track → forwards upstream (default ANALYTICS_DATA_PLANE_URL)', async () => {
+      const fetchSpy = vi
+        .spyOn(globalThis, 'fetch')
+        .mockResolvedValueOnce(new Response(null, { status: 200 }));
+      try {
+        const req = new Request('https://kernels.agx.so/_data/v1/track', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Basic ${btoa(`${WRITE_KEY}:`)}`,
+            'CF-Connecting-IP': '203.0.113.99',
+          },
+          body: '{"type":"track","event":"kernel_search","properties":{"query":"6.12"}}',
+        });
+        const ctx = createExecutionContext();
+        await worker.fetch(req, envWithKeys, ctx);
+        await waitOnExecutionContext(ctx);
+
+        expect(fetchSpy.mock.calls[0]?.[0]).toBe('https://data.agx.so/v1/batch');
+      } finally {
+        fetchSpy.mockRestore();
+      }
+    });
+
+    it('POST /_data/v1/page propagates upstream non-200 statuses (e.g. 429)', async () => {
+      const fetchSpy = vi
+        .spyOn(globalThis, 'fetch')
+        .mockResolvedValueOnce(
+          new Response('{"error":"rate limited"}', {
+            status: 429,
+            headers: { 'content-type': 'application/json' },
+          }),
+        );
+      try {
+        const req = new Request('https://kernels.agx.so/_data/v1/page', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Basic ${btoa(`${WRITE_KEY}:`)}`,
+          },
+          body: '{"type":"page"}',
+        });
+        const ctx = createExecutionContext();
+        const res = await worker.fetch(req, envWithKeys, ctx);
+        await waitOnExecutionContext(ctx);
+
+        expect(res.status).toBe(429);
+      } finally {
+        fetchSpy.mockRestore();
+      }
+    });
+
+    it('GET /_data/v1/page → 405 (POST-only)', async () => {
+      const fetchSpy = vi.spyOn(globalThis, 'fetch');
+      try {
+        const req = makeRequest('GET', '/_data/v1/page');
+        const ctx = createExecutionContext();
+        const res = await worker.fetch(req, envWithKeys, ctx);
+        await waitOnExecutionContext(ctx);
+
+        expect(res.status).toBe(405);
+        expect(res.headers.get('Allow')).toBe('POST');
+        expect(fetchSpy).not.toHaveBeenCalled();
+      } finally {
+        fetchSpy.mockRestore();
+      }
     });
   });
 });

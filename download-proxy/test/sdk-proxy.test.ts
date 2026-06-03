@@ -41,6 +41,19 @@ describe('classifySdkPath', () => {
     expect(classifySdkPath('/_data/sourceConfig')?.kind).toBe('source-config');
   });
 
+  it('matches /_data/v1/<type> as the analytics-ingest forwarder', () => {
+    expect(classifySdkPath('/_data/v1/page')?.kind).toBe('analytics-ingest');
+    expect(classifySdkPath('/_data/v1/track')?.kind).toBe('analytics-ingest');
+    expect(classifySdkPath('/_data/v1/identify')?.kind).toBe('analytics-ingest');
+    expect(classifySdkPath('/_data/v1/group')?.kind).toBe('analytics-ingest');
+    expect(classifySdkPath('/_data/v1/batch')?.kind).toBe('analytics-ingest');
+    // Path validator: lowercase letters only; trailing slash and traversal rejected.
+    expect(classifySdkPath('/_data/v1/Page')).toBeNull();
+    expect(classifySdkPath('/_data/v1/page/')).toBeNull();
+    expect(classifySdkPath('/_data/v1/')).toBeNull();
+    expect(classifySdkPath('/_data/v1/../escape')).toBeNull();
+  });
+
   it('rejects unknown shapes under /_data/', () => {
     expect(classifySdkPath('/_data/')).toBeNull();
     expect(classifySdkPath('/_data/modern/')).toBeNull();

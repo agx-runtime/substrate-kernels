@@ -11,11 +11,20 @@
  *     the SDK's `isValidSourceConfig` validator
  *     (`rudder-sdk-js`, `packages/analytics-js/src/components/configManager/util/validate.ts`).
  *
- * Three routes, all served first-party from the download-proxy worker:
+ * Four routes, all served first-party from the download-proxy worker:
  *
- *   GET /_data/<build>/client.min.js          → cdn.rudderlabs.com/<v>/<build>/rsa.min.js
- *   GET /_data/<build>/p/<file>               → cdn.rudderlabs.com/<v>/<build>/plugins/<file>
- *   GET /_data/sourceConfig/?writeKey=<k>     → synthesized JSON
+ *   GET  /_data/<build>/client.min.js          → cdn.rudderlabs.com/<v>/<build>/rsa.min.js
+ *   GET  /_data/<build>/p/<file>               → cdn.rudderlabs.com/<v>/<build>/plugins/<file>
+ *   GET  /_data/sourceConfig/?writeKey=<k>     → synthesized JSON
+ *   POST /_data/v1/<type>                      → data.agx.so/v1/batch (event ingest)
+ *
+ * The `/v1/<type>` route exists because the SDK's `XhrQueue` plugin (default
+ * events transport) builds `${dataPlaneUrl}/v1/${type}` per event, where
+ * `type` ∈ `{track, page, identify, group, ...}`. Our analytics ingest only
+ * accepts `/v1/batch`, and only sets CORS for that one path. By rewriting
+ * everything to `/v1/batch` on the worker and using same-origin POSTs from
+ * the page (`dataPlaneUrl = window.location.origin + "/_data"`), we avoid
+ * the CORS preflight entirely AND get every URL onto a first-party origin.
  *
  * docs/adr/0012, docs/design/download-proxy.md.
  */
@@ -57,11 +66,20 @@ const PATH_PLUGIN_FILE =
 /** `/_data/sourceConfig/` — the SDK appends `/sourceConfig/` to `configUrl`. */
 const PATH_SOURCE_CONFIG = /^\/_data\/sourceConfig\/?$/;
 
+/**
+ * `/_data/v1/<type>` — the SDK's XhrQueue posts per-event to `/v1/<type>`
+ * (track/page/identify/group/…). We forward to `data.agx.so/v1/batch`,
+ * which accepts both the single-message and the wrapped-batch shapes per
+ * `analytics/docs/spec/wire-format.md`. Lowercase-only matches the event
+ * types the SDK emits — anything else is 404.
+ */
+const PATH_ANALYTICS_INGEST = /^\/_data\/v1\/[a-z]+$/;
+
 /** Anything else under `/_data/`. */
 const PATH_PREFIX = /^\/_data\//;
 
 export interface SdkProxyRoute {
-  kind: 'sdk-file' | 'plugin-file' | 'source-config';
+  kind: 'sdk-file' | 'plugin-file' | 'source-config' | 'analytics-ingest';
   upstream?: string;
 }
 
@@ -82,6 +100,7 @@ export function classifySdkPath(pathname: string): SdkProxyRoute | null {
     };
   }
   if (PATH_SOURCE_CONFIG.test(pathname)) return { kind: 'source-config' };
+  if (PATH_ANALYTICS_INGEST.test(pathname)) return { kind: 'analytics-ingest' };
   return null;
 }
 
@@ -214,6 +233,64 @@ export async function proxySdkFile(upstream: string): Promise<Response> {
 }
 
 // ---------------------------------------------------------------------------
+// Analytics ingest forwarder. Rewrites every `/_data/v1/<type>` POST onto
+// `${dataPlane}/v1/batch`. The analytics ingest's `parseBatch` accepts a
+// single-message body (`{type:"page",…}`) directly, so no body rewrite is
+// needed (analytics/docs/spec/wire-format.md "Single form").
+//
+// Authorization (Basic <writeKey:>) and Content-Type are forwarded verbatim.
+// `CF-Connecting-IP` is forwarded so the analytics ingest's per-IP rate
+// limit and ip_* enrichment see the END USER's IP, not our worker's egress.
+// ---------------------------------------------------------------------------
+
+const DEFAULT_DATA_PLANE_URL = 'https://data.agx.so';
+
+const FORWARD_HEADERS = [
+  'authorization',
+  'content-type',
+  'cf-connecting-ip',
+  'user-agent',
+  'accept-language',
+] as const;
+
+export async function proxyAnalyticsIngest(
+  env: Env,
+  request: Request,
+): Promise<Response> {
+  if (request.method !== 'POST') {
+    return new Response('Method Not Allowed', {
+      status: 405,
+      headers: { Allow: 'POST' },
+    });
+  }
+  const base = (env.ANALYTICS_DATA_PLANE_URL || DEFAULT_DATA_PLANE_URL).replace(
+    /\/+$/,
+    '',
+  );
+  const upstream = `${base}/v1/batch`;
+  const headers = new Headers();
+  for (const h of FORWARD_HEADERS) {
+    const v = request.headers.get(h);
+    if (v !== null) headers.set(h, v);
+  }
+  // The SDK pre-batches in `XhrQueue` payloads; size is bounded by the
+  // SDK's own queue config and the analytics ingest's 1 MiB cap. The Worker
+  // streams the body through — no buffering, no rewrite.
+  const upstreamRes = await fetch(upstream, {
+    method: 'POST',
+    headers,
+    body: request.body,
+  });
+  // Propagate the upstream status + body. Don't pass through upstream
+  // headers wholesale (CORS / set-cookie / etc.); same-origin POST from
+  // our page → no CORS headers needed.
+  return new Response(upstreamRes.body, {
+    status: upstreamRes.status,
+    headers: { 'Content-Type': upstreamRes.headers.get('content-type') ?? 'application/json' },
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Single entry point used by index.ts.
 // ---------------------------------------------------------------------------
 
@@ -227,8 +304,16 @@ export async function serveSdkProxy(
 ): Promise<Response | null> {
   const route = classifySdkPath(new URL(request.url).pathname);
   if (route === null) return null;
+  // /_data/v1/* is POST-only; the helper enforces and rejects others.
+  if (route.kind === 'analytics-ingest') return await proxyAnalyticsIngest(env, request);
+  // Everything else is GET / HEAD.
+  if (request.method !== 'GET' && request.method !== 'HEAD') {
+    return new Response('Method Not Allowed', {
+      status: 405,
+      headers: { Allow: 'GET, HEAD' },
+    });
+  }
   if (route.kind === 'source-config') return serveSourceConfig(env, request);
-  // sdk-file / plugin-file
   if (route.upstream === undefined) return null;
   return await proxySdkFile(route.upstream);
 }

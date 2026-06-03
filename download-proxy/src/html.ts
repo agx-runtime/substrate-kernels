@@ -308,12 +308,18 @@ function renderFooter(): string {
 //   pluginsSDKBaseURL /_data/<build>/p → cdn.rudderlabs.com/<pinned>/<build>/plugins/*
 //   configUrl        /_data           → synthesized response (matches
 //                                       isValidSourceConfig in rudder-sdk-js)
+//   dataPlaneUrl     /_data           → POSTs ride /_data/v1/<type>, which
+//                                       the worker forwards to
+//                                       <ANALYTICS_DATA_PLANE_URL>/v1/batch
 //
 // Why: EasyPrivacy ships `||rudderlabs.com^$third-party` (verified on
 // `easylist/easyprivacy/easyprivacy_thirdparty.txt`), so default-uBlock
 // browsers can't load the stock SDK; and `api.rudderstack.com/sourceConfig`
 // 400s any writeKey not registered with RudderStack's hosted control plane.
-// Both vanish when every URL is first-party. docs/adr/0012, sdk-proxy.ts.
+// Pointing dataPlaneUrl at our own origin also dodges the per-event /v1/<type>
+// vs /v1/batch CORS gap — the analytics ingest only allows CORS for /v1/batch,
+// but the SDK's XhrQueue posts to /v1/<type>. Same-origin POST → no CORS,
+// and the worker rewrites to /v1/batch upstream. docs/adr/0012, sdk-proxy.ts.
 //
 // Two preserved behaviours from the stock snippet:
 //   - `.page()` on load.
@@ -324,11 +330,13 @@ function renderFooter(): string {
 // ---------------------------------------------------------------------------
 function renderAnalytics(analytics: AnalyticsConfig | null): string {
   if (analytics === null) return '';
-  // JSON.stringify → safe JS string literals for the (env-sourced) values.
+  // JSON.stringify → safe JS string literal for the (env-sourced) writeKey.
+  // `dataPlaneUrl` is no longer passed from the env — the SDK gets the
+  // same-origin `/_data` prefix and the worker rewrites POSTs to /v1/batch
+  // on `ANALYTICS_DATA_PLANE_URL` server-side.
   const wk = JSON.stringify(analytics.writeKey);
-  const dp = JSON.stringify(analytics.dataPlaneUrl);
   return `<script>
-!function(){"use strict";window.RudderSnippetVersion="3.0.62";var identifier="rudderanalytics";window[identifier]||(window[identifier]=[]);var rudderanalytics=window[identifier];if(rudderanalytics.snippetExecuted)window.console&&console.error&&console.error("Analytics SDK snippet included more than once.");else{rudderanalytics.snippetExecuted=!0,window.rudderAnalyticsBuildType="legacy";var sdkBaseUrl=window.location.origin+"/_data";var sdkName="client.min.js";var scriptLoadingMode="async";var e=["setDefaultInstanceKey","load","ready","page","track","identify","alias","group","reset","setAnonymousId","startSession","endSession","consent"];for(var n=0;n<e.length;n++){var t=e[n];rudderanalytics[t]=function(e){return function(){var n=Array.prototype.slice.call(arguments);rudderanalytics.push([e].concat(n))}}(t)}try{new Function('class Test{field=()=>{};test({prop=[]}={}){return prop?(prop?.property??[...prop]):import("")}}'),window.rudderAnalyticsBuildType="modern"}catch(a){}var d=document.head||document.getElementsByTagName("head")[0],o=document.body||document.getElementsByTagName("body")[0];window.rudderAnalyticsAddScript=function(e,t,n){var i=document.createElement("script");i.src=e,t&&n&&i.setAttribute(t,n),i.async="async"===scriptLoadingMode,i.defer="defer"===scriptLoadingMode,d?d.insertBefore(i,d.firstChild):o.insertBefore(i,o.firstChild)},window.rudderAnalyticsMount=function(){window.rudderAnalyticsAddScript("".concat(sdkBaseUrl,"/").concat(window.rudderAnalyticsBuildType,"/").concat(sdkName),"data-rsa-write-key",${wk})};window.rudderAnalyticsMount();var origin=window.location.origin;rudderanalytics.load(${wk},${dp},{configUrl:origin+"/_data",pluginsSDKBaseURL:origin+"/_data/"+window.rudderAnalyticsBuildType+"/p",destSDKBaseURL:origin+"/_data/"+window.rudderAnalyticsBuildType+"/d",lockPluginsVersion:true,lockIntegrationsVersion:true});rudderanalytics.page();rudderanalytics.ready(function(){try{document.cookie="substrate_aid="+rudderanalytics.getAnonymousId()+"; path=/; max-age=31536000; samesite=lax; secure"}catch(e){}})}}();
+!function(){"use strict";window.RudderSnippetVersion="3.0.62";var identifier="rudderanalytics";window[identifier]||(window[identifier]=[]);var rudderanalytics=window[identifier];if(rudderanalytics.snippetExecuted)window.console&&console.error&&console.error("Analytics SDK snippet included more than once.");else{rudderanalytics.snippetExecuted=!0,window.rudderAnalyticsBuildType="legacy";var sdkBaseUrl=window.location.origin+"/_data";var sdkName="client.min.js";var scriptLoadingMode="async";var e=["setDefaultInstanceKey","load","ready","page","track","identify","alias","group","reset","setAnonymousId","startSession","endSession","consent"];for(var n=0;n<e.length;n++){var t=e[n];rudderanalytics[t]=function(e){return function(){var n=Array.prototype.slice.call(arguments);rudderanalytics.push([e].concat(n))}}(t)}try{new Function('class Test{field=()=>{};test({prop=[]}={}){return prop?(prop?.property??[...prop]):import("")}}'),window.rudderAnalyticsBuildType="modern"}catch(a){}var d=document.head||document.getElementsByTagName("head")[0],o=document.body||document.getElementsByTagName("body")[0];window.rudderAnalyticsAddScript=function(e,t,n){var i=document.createElement("script");i.src=e,t&&n&&i.setAttribute(t,n),i.async="async"===scriptLoadingMode,i.defer="defer"===scriptLoadingMode,d?d.insertBefore(i,d.firstChild):o.insertBefore(i,o.firstChild)},window.rudderAnalyticsMount=function(){window.rudderAnalyticsAddScript("".concat(sdkBaseUrl,"/").concat(window.rudderAnalyticsBuildType,"/").concat(sdkName),"data-rsa-write-key",${wk})};window.rudderAnalyticsMount();var origin=window.location.origin;rudderanalytics.load(${wk},origin+"/_data",{configUrl:origin+"/_data",pluginsSDKBaseURL:origin+"/_data/"+window.rudderAnalyticsBuildType+"/p",destSDKBaseURL:origin+"/_data/"+window.rudderAnalyticsBuildType+"/d",lockPluginsVersion:true,lockIntegrationsVersion:true});rudderanalytics.page();rudderanalytics.ready(function(){try{document.cookie="substrate_aid="+rudderanalytics.getAnonymousId()+"; path=/; max-age=31536000; samesite=lax; secure"}catch(e){}})}}();
 </script>`;
 }
 

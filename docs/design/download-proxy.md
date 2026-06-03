@@ -44,6 +44,7 @@ the producer is hand-rolled per that spec in
 | **The listing page had no visit analytics** | none | `GET /` injects the RudderStack v3 SDK (cloud-mode) pointed at `ANALYTICS_DATA_PLANE_URL`, with the per-host write key from `ANALYTICS_WRITE_KEYS`; fires `page` / `kernel_search` / `kernel_download_click` / `sha256sums_download`. Injected only when a write key is configured for the host — else the page renders without it (graceful) | `test/integration.test.ts` "GET / with a write key configured" / "does NOT inject … no mapped write key" |
 | **EasyPrivacy blocks `\|\|rudderlabs.com^$third-party`** — the stock SDK CDN load is blocked by default-uBlock / Brave Shields | load directly from `cdn.rudderlabs.com` | reverse-proxy on this Worker's origin under `/_data/`: `client.min.js` → `cdn.rudderlabs.com/<pinned>/<build>/rsa.min.js`; `p/<file>` → the lazy plugin chunks (`sdk-proxy.ts`). Loader overrides `sdkBaseUrl`/`sdkName`/`pluginsSDKBaseURL` so every SDK URL stays first-party | `test/integration.test.ts` "/_data/modern/client.min.js → proxies cdn.rudderlabs.com" + HTML has no `cdn.rudderlabs.com`/`api.rudderstack.com`/`rsa.min.js` |
 | **Stock `load()` fetches source config from `api.rudderstack.com/sourceConfig` → 400 "Invalid write key"** — RudderStack's hosted control plane doesn't know our KV writeKeys | accept that as a hard failure | synthesize the response in `sdk-proxy.ts::serveSourceConfig`; minimum shape per `rudder-sdk-js`'s own `isValidSourceConfig` (`source.id` + `source.config` object + `source.destinations` array); mirror the SDK team's mock control-plane to silence error-reporting + metrics paths | `test/sdk-proxy.test.ts` source-config shape; `test/integration.test.ts` known/unknown/missing writeKey |
+| **SDK's default `XhrQueue` posts per-event to `${dataPlane}/v1/<type>`** (not `/v1/batch`) — our analytics ingest only accepts `/v1/batch` and only sets CORS for that path, so the stock `dataPlaneUrl=https://data.agx.so` configuration: (a) gets CORS-blocked on the preflight to `data.agx.so/v1/page`, and (b) 404s on the upstream path | accept the per-event POST shape | set the SDK's `dataPlaneUrl` to `window.location.origin + "/_data"` (same-origin = no CORS); the worker rewrites every `/_data/v1/<type>` POST to `${ANALYTICS_DATA_PLANE_URL}/v1/batch` (`proxyAnalyticsIngest`), forwarding `Authorization`, `Content-Type`, and `CF-Connecting-IP`, propagating upstream status so `RetryQueue` can retry 5xx | `test/integration.test.ts` `/_data/v1/page` rewrite, header forwarding, status propagation, POST-only |
 | **CDN proxy abuse + SDK schema drift** | proxy the path verbatim, follow the moving `v3/` channel | strict path regex (only `modern`/`legacy` + safe-charset plugin filenames); pin SDK to a single `PINNED_SDK_VERSION` constant; bump is a reviewed change re-validated against `isValidSourceConfig` | `test/sdk-proxy.test.ts` rejects `/_data/evil/...`, traversal, query-string bait |
 
 ## Our design
@@ -195,15 +196,17 @@ key` map; `renderAnalytics` (`src/html.ts`) emits the loader (with overridden
 (graceful). The write key sets `source = WEB:<HOST>` on the analytics side,
 so page events and the proxy event match per host.
 
-**The reverse proxy.** Three routes served by `download-proxy/src/sdk-proxy.ts`,
+**The reverse proxy.** Four routes served by `download-proxy/src/sdk-proxy.ts`,
 all first-party so EasyPrivacy's `||rudderlabs.com^$third-party` rule cannot
-match anything the page loads:
+match anything the page loads — and the SDK's per-event POSTs avoid CORS
+preflight entirely because they're same-origin:
 
-| Path | Behavior |
-|---|---|
-| `/_data/<modern\|legacy>/client.min.js` | proxies `cdn.rudderlabs.com/<pinned>/<build>/rsa.min.js` (the SDK file; renamed in our URL) |
-| `/_data/<modern\|legacy>/p/<file>` | proxies `cdn.rudderlabs.com/<pinned>/<build>/plugins/<file>` (lazy plugin chunks) |
-| `/_data/sourceConfig/?writeKey=<k>` | synthesized JSON; 401 if `<k>` isn't one of our configured write keys |
+| Method | Path | Behavior |
+|---|---|---|
+| GET | `/_data/<modern\|legacy>/client.min.js` | proxies `cdn.rudderlabs.com/<pinned>/<build>/rsa.min.js` (the SDK file; renamed in our URL) |
+| GET | `/_data/<modern\|legacy>/p/<file>` | proxies `cdn.rudderlabs.com/<pinned>/<build>/plugins/<file>` (lazy plugin chunks) |
+| GET | `/_data/sourceConfig/?writeKey=<k>` | synthesized JSON; 401 if `<k>` isn't one of our configured write keys |
+| POST | `/_data/v1/<type>` | event ingest forwarder → `${ANALYTICS_DATA_PLANE_URL}/v1/batch` (Authorization + CF-Connecting-IP forwarded; upstream status propagated for RetryQueue) |
 
 The SDK version is a single `PINNED_SDK_VERSION` constant (currently **3.31.2**)
 in `sdk-proxy.ts`; a bump is a reviewed change re-validated against
@@ -235,14 +238,14 @@ in ClickHouse — with no id in the URL. The CLI supplies its id via the
 supplied id must be ≤128 chars and `[A-Za-z0-9._:-]`, else it is ignored
 and a fresh UUID is used.
 
-**Analytics-side dependency (now narrowed).** The reverse proxy makes the
-SDK file + source-config self-contained. The only remaining off-origin URL
-is `data.agx.so/v1/batch`, which needs (a) CORS for these two hostnames
-(satisfied by analytics commit `012c7c5`) and (b) a web write key per domain
-in the `WRITE_KEYS` KV mapped to `WEB:<HOST>`. Until a write key is
-configured for the request host, the page renders without the SDK
-(graceful). If `data.agx.so` is ever added to a filter list, we proxy
-`/v1/batch` through `/_data/v1/batch` as a follow-up.
+**Analytics-side dependency (now minimal).** Nothing on the page reaches
+`data.agx.so` directly — events ride the same-origin `/_data/v1/<type>`
+route and the worker forwards Worker-to-Worker to
+`${ANALYTICS_DATA_PLANE_URL}/v1/batch`. The analytics ingest only needs (a) a
+web write key per domain in the `WRITE_KEYS` KV mapped to `WEB:<HOST>`;
+until a write key is configured for the request host, the page renders
+without the SDK (graceful). The CORS contract on `data.agx.so` (commit
+`012c7c5`) is no longer load-bearing for this page.
 
 **Plugin filenames stay upstream-named** (`rsa-plugins.js`,
 `rsa-plugins-remote-<Name>.min.js`) — the federated-module manifest is baked
