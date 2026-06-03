@@ -253,6 +253,46 @@ const FORWARD_HEADERS = [
   'accept-language',
 ] as const;
 
+/**
+ * Drop empty-string identity fields before forwarding to the analytics
+ * ingest. The RudderStack v3 SDK initializes `userId` (and sometimes
+ * `groupId` / `context.groupId`) to `""` when no `identify()` / `group()`
+ * call has been made and sends them on every payload. The ingest's
+ * validator (`packages/shared/src/validation.ts::optionalBoundedString`)
+ * treats `null`/`undefined` as "absent" but `""` as INVALID → 400
+ * `batch[N].userId invalid`. Stripping the empty strings here turns them
+ * into absent fields, which is what they semantically are. Non-empty
+ * strings pass through untouched. The wire format (see `wire-format.md`)
+ * accepts both the wrapped `{batch:[...]}` and single-message shapes.
+ */
+const NULLISH_IDENTITY_FIELDS = ['userId', 'groupId'] as const;
+
+function isPlainObject(x: unknown): x is Record<string, unknown> {
+  return typeof x === 'object' && x !== null && !Array.isArray(x);
+}
+
+function sanitizeMessage(msg: unknown): unknown {
+  if (!isPlainObject(msg)) return msg;
+  const out: Record<string, unknown> = { ...msg };
+  for (const k of NULLISH_IDENTITY_FIELDS) {
+    if (out[k] === '' || out[k] === null) delete out[k];
+  }
+  // `groupId` on track/page rides in `context.groupId` (Segment conv).
+  if (isPlainObject(out.context)) {
+    const ctx = { ...out.context };
+    if (ctx.groupId === '' || ctx.groupId === null) delete ctx.groupId;
+    out.context = ctx;
+  }
+  return out;
+}
+
+export function sanitizeBody(parsed: unknown): unknown {
+  if (isPlainObject(parsed) && Array.isArray(parsed.batch)) {
+    return { ...parsed, batch: parsed.batch.map(sanitizeMessage) };
+  }
+  return sanitizeMessage(parsed);
+}
+
 export async function proxyAnalyticsIngest(
   env: Env,
   request: Request,
@@ -273,13 +313,23 @@ export async function proxyAnalyticsIngest(
     const v = request.headers.get(h);
     if (v !== null) headers.set(h, v);
   }
-  // The SDK pre-batches in `XhrQueue` payloads; size is bounded by the
-  // SDK's own queue config and the analytics ingest's 1 MiB cap. The Worker
-  // streams the body through — no buffering, no rewrite.
+  // Buffer + sanitize. SDK web payloads are small (< 1 KiB typical, well
+  // under the ingest's 1 MiB cap), so the cost is negligible. A malformed
+  // JSON body is forwarded verbatim so the ingest's own 400 is what the
+  // SDK sees (no swallowing of validation failures by the proxy).
+  const raw = await request.text();
+  let body = raw;
+  try {
+    const parsed = JSON.parse(raw);
+    body = JSON.stringify(sanitizeBody(parsed));
+    headers.set('Content-Length', String(new TextEncoder().encode(body).byteLength));
+  } catch {
+    // Not JSON — let the ingest reject it.
+  }
   const upstreamRes = await fetch(upstream, {
     method: 'POST',
     headers,
-    body: request.body,
+    body,
   });
   // Propagate the upstream status + body. Don't pass through upstream
   // headers wholesale (CORS / set-cookie / etc.); same-origin POST from

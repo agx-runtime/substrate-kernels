@@ -636,6 +636,45 @@ describe('download-proxy fetch', () => {
       }
     });
 
+    it('POST /_data/v1/page sanitizes empty-string userId before forwarding (validator rejects "")', async () => {
+      // The RudderStack v3 SDK sends `userId: ""` for unidentified visitors;
+      // the analytics ingest's optionalBoundedString validator treats "" as
+      // invalid → 400 batch[N].userId invalid. The proxy strips it.
+      const fetchSpy = vi
+        .spyOn(globalThis, 'fetch')
+        .mockResolvedValueOnce(new Response(null, { status: 200 }));
+      try {
+        const req = new Request('https://kernels.agx.so/_data/v1/page', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Basic ${btoa(`${WRITE_KEY}:`)}`,
+          },
+          body: JSON.stringify({
+            type: 'page',
+            anonymousId: 'a-1',
+            userId: '',
+            messageId: 'm-1',
+            context: { groupId: '' },
+          }),
+        });
+        const ctx = createExecutionContext();
+        await worker.fetch(req, envWithKeys, ctx);
+        await waitOnExecutionContext(ctx);
+
+        const fwdInit = fetchSpy.mock.calls[0]?.[1] as RequestInit;
+        const fwdBody = JSON.parse(fwdInit.body as string);
+        expect(fwdBody.userId).toBeUndefined();
+        expect(fwdBody.context.groupId).toBeUndefined();
+        expect(fwdBody.context.library).toBeUndefined(); // not present in input
+        expect(fwdBody.anonymousId).toBe('a-1');
+        expect(fwdBody.type).toBe('page');
+        expect(fwdBody.messageId).toBe('m-1');
+      } finally {
+        fetchSpy.mockRestore();
+      }
+    });
+
     it('POST /_data/v1/track → forwards upstream (default ANALYTICS_DATA_PLANE_URL)', async () => {
       const fetchSpy = vi
         .spyOn(globalThis, 'fetch')

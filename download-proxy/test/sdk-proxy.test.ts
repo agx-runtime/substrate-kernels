@@ -7,7 +7,12 @@
 
 import { env } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
-import { classifySdkPath, isSdkProxyPath, serveSourceConfig } from '../src/sdk-proxy.ts';
+import {
+  classifySdkPath,
+  isSdkProxyPath,
+  sanitizeBody,
+  serveSourceConfig,
+} from '../src/sdk-proxy.ts';
 import type { Env } from '../src/types.ts';
 
 describe('classifySdkPath', () => {
@@ -158,5 +163,89 @@ describe('serveSourceConfig', () => {
     const a = await serveSourceConfig(envWithKeys, req(`?writeKey=${KEY}`)).text();
     const b = await serveSourceConfig(envWithKeys, req(`?writeKey=${KEY}`)).text();
     expect(a).toBe(b);
+  });
+});
+
+describe('sanitizeBody (strips empty/null identity fields)', () => {
+  it('strips empty-string userId from a single-message body', () => {
+    // The RudderStack v3 SDK ships `userId: ""` for unidentified visitors.
+    // The analytics validator treats "" as invalid (only null/undefined are
+    // "absent"). Stripping turns it into absent → validator accepts.
+    expect(
+      sanitizeBody({
+        type: 'page',
+        anonymousId: 'a-1',
+        userId: '',
+        messageId: 'm-1',
+      }),
+    ).toEqual({ type: 'page', anonymousId: 'a-1', messageId: 'm-1' });
+  });
+
+  it('strips null userId and groupId equally', () => {
+    expect(
+      sanitizeBody({
+        type: 'track',
+        anonymousId: 'a-1',
+        userId: null,
+        groupId: null,
+        event: 'kernel_search',
+      }),
+    ).toEqual({ type: 'track', anonymousId: 'a-1', event: 'kernel_search' });
+  });
+
+  it('keeps real userId / groupId values', () => {
+    expect(
+      sanitizeBody({
+        type: 'page',
+        anonymousId: 'a-1',
+        userId: 'u_abc',
+        groupId: 'org_acme',
+      }),
+    ).toEqual({
+      type: 'page',
+      anonymousId: 'a-1',
+      userId: 'u_abc',
+      groupId: 'org_acme',
+    });
+  });
+
+  it('strips empty context.groupId (Segment-style group binding on track/page)', () => {
+    expect(
+      sanitizeBody({
+        type: 'track',
+        anonymousId: 'a-1',
+        event: 'kernel_download_click',
+        context: { groupId: '', library: { name: 'rsa-js' } },
+      }),
+    ).toEqual({
+      type: 'track',
+      anonymousId: 'a-1',
+      event: 'kernel_download_click',
+      context: { library: { name: 'rsa-js' } },
+    });
+  });
+
+  it('handles wrapped batches', () => {
+    expect(
+      sanitizeBody({
+        batch: [
+          { type: 'page', anonymousId: 'a-1', userId: '' },
+          { type: 'track', anonymousId: 'a-2', userId: 'u_x', event: 'foo' },
+        ],
+        sentAt: '2026-06-03T00:00:00.000Z',
+      }),
+    ).toEqual({
+      batch: [
+        { type: 'page', anonymousId: 'a-1' },
+        { type: 'track', anonymousId: 'a-2', userId: 'u_x', event: 'foo' },
+      ],
+      sentAt: '2026-06-03T00:00:00.000Z',
+    });
+  });
+
+  it('passes through non-object bodies untouched', () => {
+    expect(sanitizeBody('not an object')).toBe('not an object');
+    expect(sanitizeBody(null)).toBe(null);
+    expect(sanitizeBody(42)).toBe(42);
   });
 });
