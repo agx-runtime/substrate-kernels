@@ -334,16 +334,20 @@ describe('download-proxy fetch', () => {
       // Cosign claim replaced by source link
       expect(body).not.toMatch(/cosign/i);
       expect(body).toMatch(/github\.com\/loopholelabs\/substrate-kernel/);
-      // No analytics vars configured here → the SDK loader is NOT injected
-      // (the always-present client JS still references window.rudderanalytics
-      // as a no-op, so the loader URL is the reliable presence marker).
-      expect(body).not.toContain('cdn.rudderlabs.com');
+      // No analytics vars configured here → the SDK loader is NOT injected.
+      // (Stable presence markers: the loader URL we'd build, the load() call,
+      // and the renamed client filename.)
+      expect(body).not.toContain('/_data/modern/client.min.js');
       expect(body).not.toContain('rudderanalytics.load(');
+      // Belt-and-braces against ever shipping the third-party CDN URLs.
+      expect(body).not.toContain('cdn.rudderlabs.com');
+      expect(body).not.toContain('api.rudderstack.com');
+      expect(body).not.toContain('rsa.min.js');
 
       expect(sent).toEqual([]); // not a kernel download
     });
 
-    it('GET / with a write key configured → injects the RudderStack SDK for the host', async () => {
+    it('GET / with a write key configured → injects the reverse-proxied SDK loader', async () => {
       const { queue } = stubQueue();
       const testEnv: Env = {
         ...env,
@@ -360,11 +364,19 @@ describe('download-proxy fetch', () => {
       await waitOnExecutionContext(ctx);
 
       const body = await res.text();
-      // SDK loader + our configured write key + data plane URL.
-      expect(body).toContain('cdn.rudderlabs.com');
-      expect(body).toContain('rudderanalytics.load("test-web-key","https://data.agx.so")');
+      // The loader is overridden to point at our origin under /_data/.
+      expect(body).toContain('"/_data"');
+      expect(body).toContain('"client.min.js"');
+      expect(body).toContain('rudderanalytics.load("test-web-key","https://data.agx.so",');
+      expect(body).toContain('configUrl:origin+"/_data"');
+      expect(body).toContain('pluginsSDKBaseURL');
+      expect(body).toContain('lockPluginsVersion:true');
       // The correlation cookie is set from the SDK's anonymous id.
       expect(body).toContain('substrate_aid');
+      // The third-party CDN URLs do NOT appear anywhere on the page.
+      expect(body).not.toContain('cdn.rudderlabs.com');
+      expect(body).not.toContain('api.rudderstack.com');
+      expect(body).not.toContain('rsa.min.js');
     });
 
     it('GET / does NOT inject the SDK for a host with no mapped write key', async () => {
@@ -383,7 +395,7 @@ describe('download-proxy fetch', () => {
       await waitOnExecutionContext(ctx);
 
       const body = await res.text();
-      expect(body).not.toContain('cdn.rudderlabs.com');
+      expect(body).not.toContain('/_data/modern/client.min.js');
       expect(body).not.toContain('rudderanalytics.load(');
     });
 
@@ -425,6 +437,151 @@ describe('download-proxy fetch', () => {
       const body = await res.arrayBuffer();
       expect(body.byteLength).toBe(0);
       expect(sent).toEqual([]);
+    });
+  });
+
+  describe('GET /_data/* — RudderStack SDK reverse proxy', () => {
+    const WRITE_KEY = 'kernels-substrate-key';
+    const envWithKeys: Env = {
+      ...env,
+      ANALYTICS_WRITE_KEYS: JSON.stringify({
+        'kernels.substrate.loopholelabs.io': WRITE_KEY,
+      }),
+    };
+
+    it('GET /_data/sourceConfig/?writeKey=<known> → 200 + valid source config', async () => {
+      const req = makeRequest('GET', `/_data/sourceConfig/?writeKey=${WRITE_KEY}`);
+      const ctx = createExecutionContext();
+      const res = await worker.fetch(req, envWithKeys, ctx);
+      await waitOnExecutionContext(ctx);
+
+      expect(res.status).toBe(200);
+      expect(res.headers.get('Content-Type')).toBe('application/json');
+      const body = await res.json();
+      expect(body).toMatchObject({
+        source: {
+          id: WRITE_KEY,
+          writeKey: WRITE_KEY,
+          enabled: true,
+          destinations: [],
+          config: {
+            statsCollection: {
+              errors: { enabled: false },
+              metrics: { enabled: false },
+            },
+          },
+        },
+      });
+    });
+
+    it('GET /_data/sourceConfig/?writeKey=<unknown> → 401', async () => {
+      const req = makeRequest('GET', '/_data/sourceConfig/?writeKey=bogus');
+      const ctx = createExecutionContext();
+      const res = await worker.fetch(req, envWithKeys, ctx);
+      await waitOnExecutionContext(ctx);
+
+      expect(res.status).toBe(401);
+      expect(await res.json()).toEqual({ error: 'unknown writeKey' });
+    });
+
+    it('GET /_data/sourceConfig/ (no writeKey) → 401', async () => {
+      const req = makeRequest('GET', '/_data/sourceConfig/');
+      const ctx = createExecutionContext();
+      const res = await worker.fetch(req, envWithKeys, ctx);
+      await waitOnExecutionContext(ctx);
+
+      expect(res.status).toBe(401);
+      expect(await res.json()).toEqual({ error: 'missing writeKey' });
+    });
+
+    it('GET /_data/modern/client.min.js → proxies cdn.rudderlabs.com (fetch stub asserts upstream URL)', async () => {
+      const upstreamBody = 'var __FAKE_SDK__ = 1;';
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+        new Response(upstreamBody, {
+          status: 200,
+          headers: { 'content-type': 'application/javascript' },
+        }),
+      );
+      try {
+        const req = makeRequest('GET', '/_data/modern/client.min.js');
+        const ctx = createExecutionContext();
+        const res = await worker.fetch(req, envWithKeys, ctx);
+        await waitOnExecutionContext(ctx);
+
+        expect(fetchSpy).toHaveBeenCalledTimes(1);
+        const upstreamUrl = fetchSpy.mock.calls[0]?.[0];
+        expect(upstreamUrl).toBe(
+          'https://cdn.rudderlabs.com/3.31.2/modern/rsa.min.js',
+        );
+        expect(res.status).toBe(200);
+        expect(res.headers.get('Content-Type')).toBe('application/javascript');
+        expect(res.headers.get('Cache-Control')).toContain('immutable');
+        expect(await res.text()).toBe(upstreamBody);
+      } finally {
+        fetchSpy.mockRestore();
+      }
+    });
+
+    it('GET /_data/modern/p/rsa-plugins.js → proxies the upstream plugins directory', async () => {
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+        new Response('// plugin chunk', {
+          status: 200,
+          headers: { 'content-type': 'application/javascript' },
+        }),
+      );
+      try {
+        const req = makeRequest('GET', '/_data/modern/p/rsa-plugins.js');
+        const ctx = createExecutionContext();
+        const res = await worker.fetch(req, envWithKeys, ctx);
+        await waitOnExecutionContext(ctx);
+
+        expect(fetchSpy.mock.calls[0]?.[0]).toBe(
+          'https://cdn.rudderlabs.com/3.31.2/modern/plugins/rsa-plugins.js',
+        );
+        expect(res.status).toBe(200);
+      } finally {
+        fetchSpy.mockRestore();
+      }
+    });
+
+    it('GET /_data/<bad>/client.min.js → 404, no upstream fetch', async () => {
+      const fetchSpy = vi.spyOn(globalThis, 'fetch');
+      try {
+        const req = makeRequest('GET', '/_data/evil/client.min.js');
+        const ctx = createExecutionContext();
+        const res = await worker.fetch(req, envWithKeys, ctx);
+        await waitOnExecutionContext(ctx);
+
+        expect(res.status).toBe(404);
+        expect(fetchSpy).not.toHaveBeenCalled();
+      } finally {
+        fetchSpy.mockRestore();
+      }
+    });
+
+    it('GET /_data/ (no specific route) → 404, no upstream fetch', async () => {
+      const fetchSpy = vi.spyOn(globalThis, 'fetch');
+      try {
+        const req = makeRequest('GET', '/_data/');
+        const ctx = createExecutionContext();
+        const res = await worker.fetch(req, envWithKeys, ctx);
+        await waitOnExecutionContext(ctx);
+
+        expect(res.status).toBe(404);
+        expect(fetchSpy).not.toHaveBeenCalled();
+      } finally {
+        fetchSpy.mockRestore();
+      }
+    });
+
+    it('POST /_data/modern/client.min.js → 405', async () => {
+      const req = makeRequest('POST', '/_data/modern/client.min.js');
+      const ctx = createExecutionContext();
+      const res = await worker.fetch(req, envWithKeys, ctx);
+      await waitOnExecutionContext(ctx);
+
+      expect(res.status).toBe(405);
+      expect(res.headers.get('Allow')).toBe('GET, HEAD');
     });
   });
 });

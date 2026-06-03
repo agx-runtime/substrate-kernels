@@ -300,14 +300,27 @@ function renderFooter(): string {
 }
 
 // ---------------------------------------------------------------------------
-// Analytics — the official RudderStack JS SDK v3 cloud-mode load snippet,
-// injected only when a per-host write key is configured (docs/adr/0012).
-// The write key sets `source = WEB:<HOSTNAME UPPERCASE>` on the analytics
-// side, matching the proxy's server-side download event. Two additions to
-// the stock snippet: `.page()` on load, and a self-owned `substrate_aid`
-// cookie set from `getAnonymousId()` so a same-origin `.kernel` download
-// carries the same anonymous id the proxy stamps — that is what correlates
-// the page's `kernel_download_click` with the server-side `kernel_download`.
+// Analytics — the RudderStack v3 JS SDK loaded via a same-origin reverse
+// proxy. Every URL the SDK touches is served from THIS worker under `/_data/`:
+//
+//   sdkBaseUrl       /_data           → cdn.rudderlabs.com/<pinned>/<build>/rsa.min.js
+//                                       served as `client.min.js`
+//   pluginsSDKBaseURL /_data/<build>/p → cdn.rudderlabs.com/<pinned>/<build>/plugins/*
+//   configUrl        /_data           → synthesized response (matches
+//                                       isValidSourceConfig in rudder-sdk-js)
+//
+// Why: EasyPrivacy ships `||rudderlabs.com^$third-party` (verified on
+// `easylist/easyprivacy/easyprivacy_thirdparty.txt`), so default-uBlock
+// browsers can't load the stock SDK; and `api.rudderstack.com/sourceConfig`
+// 400s any writeKey not registered with RudderStack's hosted control plane.
+// Both vanish when every URL is first-party. docs/adr/0012, sdk-proxy.ts.
+//
+// Two preserved behaviours from the stock snippet:
+//   - `.page()` on load.
+//   - `.ready(...)` callback writes a first-party `substrate_aid` cookie
+//     from `getAnonymousId()` so a same-origin `.kernel` download carries the
+//     same anonymous id the proxy stamps server-side — correlates the page's
+//     `kernel_download_click` with the server-side `kernel_download`.
 // ---------------------------------------------------------------------------
 function renderAnalytics(analytics: AnalyticsConfig | null): string {
   if (analytics === null) return '';
@@ -315,7 +328,7 @@ function renderAnalytics(analytics: AnalyticsConfig | null): string {
   const wk = JSON.stringify(analytics.writeKey);
   const dp = JSON.stringify(analytics.dataPlaneUrl);
   return `<script>
-!function(){"use strict";window.RudderSnippetVersion="3.0.62";var identifier="rudderanalytics";window[identifier]||(window[identifier]=[]);var rudderanalytics=window[identifier];if(rudderanalytics.snippetExecuted)window.console&&console.error&&console.error("RudderStack JavaScript SDK snippet included more than once.");else{rudderanalytics.snippetExecuted=!0,window.rudderAnalyticsBuildType="legacy";var sdkBaseUrl="https://cdn.rudderlabs.com/v3";var sdkName="rsa.min.js";var scriptLoadingMode="async";var e=["setDefaultInstanceKey","load","ready","page","track","identify","alias","group","reset","setAnonymousId","startSession","endSession","consent"];for(var n=0;n<e.length;n++){var t=e[n];rudderanalytics[t]=function(e){return function(){var n=Array.prototype.slice.call(arguments);rudderanalytics.push([e].concat(n))}}(t)}try{new Function('class Test{field=()=>{};test({prop=[]}={}){return prop?(prop?.property??[...prop]):import("")}}'),window.rudderAnalyticsBuildType="modern"}catch(a){}var d=document.head||document.getElementsByTagName("head")[0],o=document.body||document.getElementsByTagName("body")[0];window.rudderAnalyticsAddScript=function(e,t,n){var i=document.createElement("script");i.src=e,i.setAttribute("data-loader","RS_JS_SDK"),t&&n&&i.setAttribute(t,n),i.async="async"===scriptLoadingMode,i.defer="defer"===scriptLoadingMode,d?d.insertBefore(i,d.firstChild):o.insertBefore(i,o.firstChild)},window.rudderAnalyticsMount=function(){window.rudderAnalyticsAddScript("".concat(sdkBaseUrl,"/").concat(window.rudderAnalyticsBuildType,"/").concat(sdkName),"data-rsa-write-key",${wk})},"undefined"==typeof Promise||"undefined"==typeof globalThis?window.rudderAnalyticsAddScript("https://polyfill-fastly.io/v3/polyfill.min.js?version=3.111.0&features=Symbol%2CPromise&callback=rudderAnalyticsMount"):window.rudderAnalyticsMount();rudderanalytics.load(${wk},${dp});rudderanalytics.page();rudderanalytics.ready(function(){try{document.cookie="substrate_aid="+rudderanalytics.getAnonymousId()+"; path=/; max-age=31536000; samesite=lax; secure"}catch(e){}})}}();
+!function(){"use strict";window.RudderSnippetVersion="3.0.62";var identifier="rudderanalytics";window[identifier]||(window[identifier]=[]);var rudderanalytics=window[identifier];if(rudderanalytics.snippetExecuted)window.console&&console.error&&console.error("Analytics SDK snippet included more than once.");else{rudderanalytics.snippetExecuted=!0,window.rudderAnalyticsBuildType="legacy";var sdkBaseUrl=window.location.origin+"/_data";var sdkName="client.min.js";var scriptLoadingMode="async";var e=["setDefaultInstanceKey","load","ready","page","track","identify","alias","group","reset","setAnonymousId","startSession","endSession","consent"];for(var n=0;n<e.length;n++){var t=e[n];rudderanalytics[t]=function(e){return function(){var n=Array.prototype.slice.call(arguments);rudderanalytics.push([e].concat(n))}}(t)}try{new Function('class Test{field=()=>{};test({prop=[]}={}){return prop?(prop?.property??[...prop]):import("")}}'),window.rudderAnalyticsBuildType="modern"}catch(a){}var d=document.head||document.getElementsByTagName("head")[0],o=document.body||document.getElementsByTagName("body")[0];window.rudderAnalyticsAddScript=function(e,t,n){var i=document.createElement("script");i.src=e,t&&n&&i.setAttribute(t,n),i.async="async"===scriptLoadingMode,i.defer="defer"===scriptLoadingMode,d?d.insertBefore(i,d.firstChild):o.insertBefore(i,o.firstChild)},window.rudderAnalyticsMount=function(){window.rudderAnalyticsAddScript("".concat(sdkBaseUrl,"/").concat(window.rudderAnalyticsBuildType,"/").concat(sdkName),"data-rsa-write-key",${wk})};window.rudderAnalyticsMount();var origin=window.location.origin;rudderanalytics.load(${wk},${dp},{configUrl:origin+"/_data",pluginsSDKBaseURL:origin+"/_data/"+window.rudderAnalyticsBuildType+"/p",destSDKBaseURL:origin+"/_data/"+window.rudderAnalyticsBuildType+"/d",lockPluginsVersion:true,lockIntegrationsVersion:true});rudderanalytics.page();rudderanalytics.ready(function(){try{document.cookie="substrate_aid="+rudderanalytics.getAnonymousId()+"; path=/; max-age=31536000; samesite=lax; secure"}catch(e){}})}}();
 </script>`;
 }
 

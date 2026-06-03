@@ -25,6 +25,7 @@ import { type Listing, listKernels } from './listing.ts';
 import { serveFromR2 } from './r2.ts';
 import { checkRateLimit } from './ratelimit.ts';
 import { parsePath } from './router.ts';
+import { isSdkProxyPath, serveSdkProxy } from './sdk-proxy.ts';
 import type { AnalyticsConfig, Env } from './types.ts';
 
 export default {
@@ -49,6 +50,21 @@ export default {
     // hits short-circuit at the CF edge or via If-None-Match.
     if (url.pathname === '/' && (request.method === 'GET' || request.method === 'HEAD')) {
       return await serveListing(request, env);
+    }
+
+    // First-party RudderStack SDK reverse proxy (docs/adr/0012). Routed
+    // BEFORE the R2 fall-through so an unknown `/_data/...` shape returns
+    // 404 instead of trying to read an R2 key. No analytics emit (the proxy
+    // routes are infrastructure, not kernel downloads).
+    if (isSdkProxyPath(url.pathname)) {
+      if (request.method !== 'GET' && request.method !== 'HEAD') {
+        return new Response('Method Not Allowed', {
+          status: 405,
+          headers: { Allow: 'GET, HEAD' },
+        });
+      }
+      const sdk = await serveSdkProxy(env, request);
+      return sdk ?? new Response('Not found', { status: 404 });
     }
 
     const parsed = parsePath(url.pathname);

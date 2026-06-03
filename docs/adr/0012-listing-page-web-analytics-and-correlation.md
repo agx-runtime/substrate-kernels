@@ -39,11 +39,14 @@ Two facts shape the design:
 
 ## Decision
 
-1. **Load the RudderStack JS SDK on `GET /`.** The Worker injects the official v3
-   loader into `<head>` only when a write key is configured for the request host
-   (below); otherwise the page renders without it (graceful no-op). The page fires
-   `page` on load and `track` events for `kernel_search` (debounced), and
-   `kernel_download_click` / `sha256sums_download` on the matching download clicks.
+1. **Load the RudderStack JS SDK on `GET /` via a same-origin reverse proxy.**
+   The Worker injects the v3 loader into `<head>` only when a write key is
+   configured for the request host (below); otherwise the page renders without
+   it (graceful no-op). The loader is modified to load every SDK URL from
+   first-party paths under `/_data/` on this Worker — see §6 for the route
+   set. The page fires `page` on load and `track` events for `kernel_search`
+   (debounced), and `kernel_download_click` / `sha256sums_download` on the
+   matching download clicks.
 
 2. **`source` = `WEB:<HOSTNAME UPPERCASE>`** (e.g. `WEB:KERNELS.AGX.SO`), on **both**
    surfaces:
@@ -79,12 +82,58 @@ Two facts shape the design:
    and the SDK config is changeable without a code edit. The page HTML embeds a
    per-host write key, so the host is folded into the listing ETag.
 
-6. **The analytics side is a dependency, tracked, not in this repo.** For the SDK to
-   work end-to-end the analytics ingest must (a) allow CORS from the two hostnames,
-   (b) have a web write key per domain in its `WRITE_KEYS` KV mapped to
-   `WEB:<HOST>`, and (c) make the SDK's source config reachable. Until then the
-   Worker degrades gracefully (no write key configured → no SDK; the page and all
-   downloads still work).
+6. **Reverse-proxy the SDK on our own origin** (this Worker, under `/_data/`):
+   the SDK file, its lazy-loaded plugin chunks, and the source-config endpoint
+   are all served first-party. The loaded SDK then posts events to
+   `data.agx.so/v1/batch` (already CORS-allowed for both hostnames; analytics
+   commit `012c7c5`). Two structural problems vanish:
+   - **Adblock host filters can't match.** EasyPrivacy ships
+     `||rudderlabs.com^$third-party` (verified on `easylist/easyprivacy/`
+     master); the standard CDN load `cdn.rudderlabs.com/v3/<build>/rsa.min.js`
+     is blocked by default uBlock / Brave Shields. First-party URLs defeat
+     this unconditionally.
+   - **The control-plane dependency vanishes.** Stock `load()` fetches source
+     config from `api.rudderstack.com/sourceConfig` — which 400s any writeKey
+     not registered with RudderStack's hosted control plane. We host our own
+     ingest; our writeKeys exist only in our KV. Synthesizing the response on
+     our side bypasses the dependency entirely.
+
+   Routes (all GET, served by `download-proxy/src/sdk-proxy.ts`):
+   | Path | Behavior |
+   |---|---|
+   | `/_data/<modern\|legacy>/client.min.js` | proxies `cdn.rudderlabs.com/<pinned>/<build>/rsa.min.js` (filename renamed in our URL) |
+   | `/_data/<modern\|legacy>/p/<file>` | proxies `cdn.rudderlabs.com/<pinned>/<build>/plugins/<file>` (lazy plugin chunks) |
+   | `/_data/sourceConfig/?writeKey=<k>` | synthesized JSON; `?writeKey` must be one of the configured per-host write keys |
+
+   The SDK loader is modified to set `sdkBaseUrl = window.location.origin +
+   "/_data"`, `sdkName = "client.min.js"`, and pass `configUrl`,
+   `pluginsSDKBaseURL`, `destSDKBaseURL` load options pointing at the same
+   prefix. The pinned SDK version (currently **3.31.2**) is a single constant
+   in `sdk-proxy.ts`; bumping it is a reviewed change re-validated against the
+   `isValidSourceConfig` shape.
+
+   The synthesized source-config body mirrors the SDK team's own mock
+   (`rudder-sdk-js/examples/utils/mock-servers/control-plane.js`) with
+   `source.config.statsCollection.{errors,metrics}.enabled = false` so the
+   SDK does not spin up the `/rsaMetrics` error-reporting path. The minimum
+   shape the SDK accepts is `{ source: { id, config: {}, destinations: [] } }`
+   per `rudder-sdk-js/packages/analytics-js/src/components/configManager/util/validate.ts::isValidSourceConfig`;
+   the extra fields we ship (writeKey, enabled, name, workspaceId, updatedAt)
+   match the mock for forward-compatibility.
+
+   **Plugin filenames stay upstream-named** (`rsa-plugins.js`,
+   `rsa-plugins-remote-<Name>.min.js`) because the federated-module manifest
+   is baked into the SDK proper; renaming requires rewriting the SDK body on
+   the fly. Not in current EasyPrivacy; flagged as a future hardening step if
+   filter lists ever add a `rsa-plugins` rule.
+
+7. **The remaining analytics-side dependency.** Only `/v1/batch` itself stays
+   off-origin (on `data.agx.so`). The analytics ingest must (a) allow CORS
+   from these hostnames (commit `012c7c5`, satisfied), and (b) have a web
+   write key per domain in its `WRITE_KEYS` KV mapped to `WEB:<HOST>`. The
+   reverse proxy at `/_data/` is self-contained; no analytics-side change is
+   required to host or serve it. If `data.agx.so` is ever added to a filter
+   list, we can proxy `/v1/batch` through `/_data/v1/batch` as a follow-up.
 
 ## Consequences
 
@@ -107,6 +156,21 @@ Two facts shape the design:
 
 ## Alternatives considered
 
+- **The stock RudderStack v3 loader pointed at `cdn.rudderlabs.com` and
+  `api.rudderstack.com`.** Initial choice, reverted. Two structural failures
+  in production: (a) EasyPrivacy blocks `||rudderlabs.com^$third-party`, so
+  default-uBlock browsers never load the script; (b) the SDK's `load()`
+  fetches source config from `api.rudderstack.com/sourceConfig`, which 400s
+  any writeKey not registered with RudderStack's hosted control plane — we
+  host our own ingest, so the writeKeys exist only in our KV. The reverse
+  proxy in §6 fixes both unconditionally and is the pattern RudderStack docs
+  themselves recommend ("Harden JavaScript SDK", "Self-host JavaScript SDK in
+  Your CDN") and that PostHog ships for their own SDK proxy.
+- **A 50-line first-party inline tracker** matching the analytics wire format
+  directly (`POST /v1/batch` with Basic auth). Considered, rejected: it works,
+  but we lose the SDK's session / auto-page / queue / retry machinery and
+  every future SDK improvement; the reverse proxy gives us those for ~100
+  lines of worker code instead.
 - **A same-origin in-repo ingest sink** (the page posts to a `/v1/batch` on this
   Worker, which enqueues directly) — rejected: it would avoid the analytics-side
   CORS dependency and give `source = domain` for free, but it re-implements the

@@ -41,7 +41,10 @@ the producer is hand-rolled per that spec in
 | **`source` should name the site for per-domain slicing** ([ADR 0012](../adr/0012-listing-page-web-analytics-and-correlation.md)) | a fixed producer label | `source = WEB:<HOSTNAME UPPERCASE>` on **both** the proxy event (derived from the request host) and the page SDK events (via the per-host write key → KV mapping); they match per host. `event_name` distinguishes `kernel_download` (server) from `kernel_download_click` (web) | `test/integration.test.ts` asserts `source = WEB:<HOST>` |
 | **The proxy event's `anonymous_id` was a throwaway** — nothing could be tied to it | fresh random per download | resolve `X-Substrate-Anonymous-Id` header (CLI) → `substrate_aid` cookie (browser) → fresh UUID; a supplied id must be ≤128 chars + `[A-Za-z0-9._:-]` or it is ignored (never poisons the column) | `test/integration.test.ts` header / cookie / header-beats-cookie / malformed-fallback |
 | **Correlating a page download-click with the actual transfer** without an id in the URL | redirect with the id in the query string (cache fragmentation) | the listing page + the proxy are **same origin**, so a first-party `substrate_aid` cookie (set from the SDK's `getAnonymousId()`) rides the same-origin download navigation; the proxy reads it. No URL change, no edge-cache fragmentation | end-to-end (ClickHouse join on `anonymous_id`); cookie-read covered by the integration test |
-| **The listing page had no visit analytics** | none | `GET /` injects the official RudderStack v3 SDK (cloud-mode) pointed at `ANALYTICS_DATA_PLANE_URL`, with the per-host write key from `ANALYTICS_WRITE_KEYS`; fires `page` / `kernel_search` / `kernel_download_click` / `sha256sums_download`. Injected only when a write key is configured for the host — else the page renders without it (graceful) | `test/integration.test.ts` "GET / with a write key configured" / "does NOT inject … no mapped write key" |
+| **The listing page had no visit analytics** | none | `GET /` injects the RudderStack v3 SDK (cloud-mode) pointed at `ANALYTICS_DATA_PLANE_URL`, with the per-host write key from `ANALYTICS_WRITE_KEYS`; fires `page` / `kernel_search` / `kernel_download_click` / `sha256sums_download`. Injected only when a write key is configured for the host — else the page renders without it (graceful) | `test/integration.test.ts` "GET / with a write key configured" / "does NOT inject … no mapped write key" |
+| **EasyPrivacy blocks `\|\|rudderlabs.com^$third-party`** — the stock SDK CDN load is blocked by default-uBlock / Brave Shields | load directly from `cdn.rudderlabs.com` | reverse-proxy on this Worker's origin under `/_data/`: `client.min.js` → `cdn.rudderlabs.com/<pinned>/<build>/rsa.min.js`; `p/<file>` → the lazy plugin chunks (`sdk-proxy.ts`). Loader overrides `sdkBaseUrl`/`sdkName`/`pluginsSDKBaseURL` so every SDK URL stays first-party | `test/integration.test.ts` "/_data/modern/client.min.js → proxies cdn.rudderlabs.com" + HTML has no `cdn.rudderlabs.com`/`api.rudderstack.com`/`rsa.min.js` |
+| **Stock `load()` fetches source config from `api.rudderstack.com/sourceConfig` → 400 "Invalid write key"** — RudderStack's hosted control plane doesn't know our KV writeKeys | accept that as a hard failure | synthesize the response in `sdk-proxy.ts::serveSourceConfig`; minimum shape per `rudder-sdk-js`'s own `isValidSourceConfig` (`source.id` + `source.config` object + `source.destinations` array); mirror the SDK team's mock control-plane to silence error-reporting + metrics paths | `test/sdk-proxy.test.ts` source-config shape; `test/integration.test.ts` known/unknown/missing writeKey |
+| **CDN proxy abuse + SDK schema drift** | proxy the path verbatim, follow the moving `v3/` channel | strict path regex (only `modern`/`legacy` + safe-charset plugin filenames); pin SDK to a single `PINNED_SDK_VERSION` constant; bump is a reviewed change re-validated against `isValidSourceConfig` | `test/sdk-proxy.test.ts` rejects `/_data/evil/...`, traversal, query-string bait |
 
 ## Our design
 
@@ -183,13 +186,36 @@ immediately; failures are logged to `console.error` and swallowed.
 
 ### Listing-page analytics + correlation ([ADR 0012](../adr/0012-listing-page-web-analytics-and-correlation.md))
 
-`GET /` injects the official RudderStack v3 SDK (cloud-mode) into `<head>`
-when a write key is configured for the request host. `download-proxy/src/index.ts`
-`resolveAnalytics(env, hostname)` reads `ANALYTICS_DATA_PLANE_URL` and the
-`ANALYTICS_WRITE_KEYS` `hostname → write key` map; `renderAnalytics`
-(`src/html.ts`) emits the loader (`rudderanalytics.load(<key>, <dataPlaneUrl>)`,
-`.page()`) or nothing (graceful). The write key sets `source = WEB:<HOST>` on
-the analytics side, so page events and the proxy event match per host.
+`GET /` injects the RudderStack v3 SDK (cloud-mode) into `<head>` via a
+**same-origin reverse proxy** when a write key is configured for the request
+host. `download-proxy/src/index.ts` `resolveAnalytics(env, hostname)` reads
+`ANALYTICS_DATA_PLANE_URL` and the `ANALYTICS_WRITE_KEYS` `hostname → write
+key` map; `renderAnalytics` (`src/html.ts`) emits the loader (with overridden
+`sdkBaseUrl` / `sdkName` / `configUrl` / `pluginsSDKBaseURL`) or nothing
+(graceful). The write key sets `source = WEB:<HOST>` on the analytics side,
+so page events and the proxy event match per host.
+
+**The reverse proxy.** Three routes served by `download-proxy/src/sdk-proxy.ts`,
+all first-party so EasyPrivacy's `||rudderlabs.com^$third-party` rule cannot
+match anything the page loads:
+
+| Path | Behavior |
+|---|---|
+| `/_data/<modern\|legacy>/client.min.js` | proxies `cdn.rudderlabs.com/<pinned>/<build>/rsa.min.js` (the SDK file; renamed in our URL) |
+| `/_data/<modern\|legacy>/p/<file>` | proxies `cdn.rudderlabs.com/<pinned>/<build>/plugins/<file>` (lazy plugin chunks) |
+| `/_data/sourceConfig/?writeKey=<k>` | synthesized JSON; 401 if `<k>` isn't one of our configured write keys |
+
+The SDK version is a single `PINNED_SDK_VERSION` constant (currently **3.31.2**)
+in `sdk-proxy.ts`; a bump is a reviewed change re-validated against
+`isValidSourceConfig`. The synthesized source-config body mirrors
+`rudder-sdk-js/examples/utils/mock-servers/control-plane.js` with
+`statsCollection.{errors,metrics}.enabled = false` so the SDK does not spin
+up the `/rsaMetrics` error-reporting path. Minimum-required shape per
+`rudder-sdk-js/packages/analytics-js/src/components/configManager/util/validate.ts::isValidSourceConfig`:
+`{ source: { id, config: {}, destinations: [] } }`. CDN responses are
+cached `public, max-age=86400, immutable` (pin makes them content-stable);
+source-config is `max-age=300` (the response is byte-stable per writeKey so
+the CF edge can cache it).
 
 The page fires `track` events from the inline client JS: `kernel_search`
 (debounced), and `kernel_download_click` / `sha256sums_download` on the
@@ -209,10 +235,20 @@ in ClickHouse — with no id in the URL. The CLI supplies its id via the
 supplied id must be ≤128 chars and `[A-Za-z0-9._:-]`, else it is ignored
 and a fresh UUID is used.
 
-**Dependency (analytics side, separate repo):** CORS from these hostnames on
-the ingest, a web write key per domain in the `WRITE_KEYS` KV (each mapped to
-`WEB:<HOST>`), and a reachable SDK source config. Until those exist the page
-no-ops cleanly (no write key configured → no SDK).
+**Analytics-side dependency (now narrowed).** The reverse proxy makes the
+SDK file + source-config self-contained. The only remaining off-origin URL
+is `data.agx.so/v1/batch`, which needs (a) CORS for these two hostnames
+(satisfied by analytics commit `012c7c5`) and (b) a web write key per domain
+in the `WRITE_KEYS` KV mapped to `WEB:<HOST>`. Until a write key is
+configured for the request host, the page renders without the SDK
+(graceful). If `data.agx.so` is ever added to a filter list, we proxy
+`/v1/batch` through `/_data/v1/batch` as a follow-up.
+
+**Plugin filenames stay upstream-named** (`rsa-plugins.js`,
+`rsa-plugins-remote-<Name>.min.js`) — the federated-module manifest is baked
+into `rsa.min.js`, so renaming requires rewriting the SDK body on the fly.
+Not in current EasyPrivacy; flagged as a future hardening step if filter
+lists ever add a `rsa-plugins` rule.
 
 ### Bindings — `download-proxy/wrangler.toml`
 
