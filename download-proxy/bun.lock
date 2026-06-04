@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "substrate-kernel-download-proxy",
+      "name": "substrate-kernels-download-proxy",
       "devDependencies": {
         "@cloudflare/vitest-pool-workers": "0.16.10",
         "@cloudflare/workers-types": "4.20260527.1",

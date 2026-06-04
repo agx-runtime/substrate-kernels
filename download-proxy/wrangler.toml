@@ -1,4 +1,4 @@
-# substrate-kernel download proxy.
+# substrate-kernels download proxy.
 #
 # Bound at the two public hostnames the README documents — clients use the
 # same URL they did when R2 served directly; the Worker is now in front of
@@ -12,7 +12,7 @@
 #
 # docs/design/download-proxy.md is authoritative.
 
-name = "substrate-kernel-download-proxy"
+name = "substrate-kernels-download-proxy"
 main = "src/index.ts"
 compatibility_date = "2025-04-01"
 # Disable the *.workers.dev URL — the Worker is only reachable via the
@@ -38,9 +38,9 @@ queue = "analytics-events"
 # to its `source = WEB:<HOSTNAME UPPERCASE>` on the analytics side. Write
 # keys are NOT secrets (analytics ADR 0010), so they live in [vars]. The SDK
 # is injected only when a write key is configured for the request host —
-# until ANALYTICS_WRITE_KEYS is set, the page renders without the SDK
+# until AGX_ANALYTICS_KEYS is set, the page renders without the SDK
 # (graceful). The only analytics-side requirement now is the per-domain web
-# write key in the WRITE_KEYS KV (each: `{ source: "WEB:KERNELS.AGX.SO",
+# write key in the AGX_ANALYTICS_KEYS KV (each: `{ source: "WEB:KERNELS.AGX.SO",
 # enabled: true }`); the CORS contract on data.agx.so is no longer
 # load-bearing for this page since nothing on it talks to data.agx.so
 # directly.
@@ -50,7 +50,11 @@ ANALYTICS_DATA_PLANE_URL = "https://data.agx.so"
 # analytics-side KV record stamps the matching source; the proxy's own
 # kernel_download event derives the same WEB:<HOST> string from the request
 # host, so the page events and the download event share `source` per host.
-ANALYTICS_WRITE_KEYS = '{"kernels.agx.so":"99bc203c52705a8f0d6027f3f08c5e3ffe775fd9db3d9881","kernels.substrate.loopholelabs.io":"19bd9b376d833af85b1e0e55edaba2f5fc6750e78e5f1382"}'
+# NOTE: the kernels.substrate.so key was originally provisioned for
+# kernels.substrate.loopholelabs.io — its analytics-side AGX_ANALYTICS_KEYS
+# KV record must read `{ source: "WEB:KERNELS.SUBSTRATE.SO", enabled: true }`
+# before the SDK events on the new host carry the right source.
+AGX_ANALYTICS_KEYS = '{"kernels.agx.so":"99bc203c52705a8f0d6027f3f08c5e3ffe775fd9db3d9881","kernels.substrate.so":"19bd9b376d833af85b1e0e55edaba2f5fc6750e78e5f1382"}'
 
 # Per-IP rate limit: 60 req/min. Public + unauthenticated; this bounds
 # (a) Workers CPU/request quota from a single source, (b) the analytics
@@ -68,7 +72,7 @@ simple = { limit = 60, period = 60 }
 # the DNS + SSL records on first deploy. Direct R2 S3 URLs remain
 # accessible as a break-glass for ops; clients use these.
 [[routes]]
-pattern = "kernels.substrate.loopholelabs.io"
+pattern = "kernels.substrate.so"
 custom_domain = true
 
 [[routes]]

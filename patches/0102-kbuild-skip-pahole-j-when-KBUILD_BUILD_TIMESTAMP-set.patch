@@ -1,5 +1,5 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
-From: substrate <substrate-kernel@loopholelabs.io>
+From: substrate <substrate-kernels@agx.so>
 Date: Mon, 01 Jun 2026 00:00:00 +0000
 Subject: [PATCH] kbuild: skip pahole -j when KBUILD_BUILD_TIMESTAMP is set
 
@@ -9,7 +9,7 @@ v1.22+. Parallel BTF generation produces non-deterministic type_id
 allocation, and those IDs are written into the `.BTF` and `.BTF_ids`
 ELF sections of vmlinux. The result is that two identical builds of a
 debug-info kernel produce different bytes in the BTF region, defeating
-reproducibility (the substrate-kernel `repro-check` gate, CLAUDE.md §3
+reproducibility (the substrate-kernels `repro-check` gate, CLAUDE.md §3
 / ADR 0005).
 
 Treat `KBUILD_BUILD_TIMESTAMP` as the reproducibility signal kbuild
@@ -22,12 +22,12 @@ Upstream context:
   (LKML 2024-03 "kbuild: disable pahole multi-threading on reproducible
   builds")
 
-Without this, substrate-kernel's debug-variant repro-check
+Without this, substrate-kernels' debug-variant repro-check
 (VARIANT=debug, ARCH=x86_64) fails: the BTF region of vmlinux differs
 between identical builds; the `.kernel` bundles differ by ~2.9 M bytes
 clustered in the `.BTF`/`.BTF_ids` payload.
 
-Signed-off-by: substrate <substrate-kernel@loopholelabs.io>
+Signed-off-by: substrate <substrate-kernels@agx.so>
 ---
 diff --git a/scripts/Makefile.btf b/scripts/Makefile.btf
 index b75f09f3c..a9c4f6d31 100644

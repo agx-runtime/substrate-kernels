@@ -30,7 +30,7 @@ export interface Env extends ProxyEnv {
    * `source = WEB:<HOSTNAME UPPERCASE>`. Write keys are not secrets (analytics
    * ADR 0010), so this lives in `[vars]`. Absent / no match → no SDK.
    */
-  ANALYTICS_WRITE_KEYS?: string;
+  AGX_ANALYTICS_KEYS?: string;
 }
 
 /**

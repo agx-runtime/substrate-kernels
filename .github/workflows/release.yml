@@ -70,7 +70,7 @@ jobs:
     runs-on:
       - nscloud-ubuntu-24.04-${{ matrix.rarch }}-8x16-with-cache;github.run-id=${{ github.run_id }}
       - nscloud-cache-size-50gb
-      - nscloud-cache-tag-substrate-kernel-${{ matrix.rarch }}
+      - nscloud-cache-tag-substrate-kernels-${{ matrix.rarch }}
       - nscloud-container-image-cache
       - namespace-features:container.privileged=true
     steps:
@@ -81,10 +81,10 @@ jobs:
           path: tarballs
           key: kernel-tarball-${{ hashFiles('scripts/kernel-pin.env') }}
       - name: Build the pinned toolchain container
-        run: docker build -t substrate-kernel-build tools/build
+        run: docker build -t substrate-kernels-build tools/build
       - name: Build the bundle (compile + pack) in the pinned container
         run: |
-          docker run --rm -v "$PWD":/work -w /work substrate-kernel-build \
+          docker run --rm -v "$PWD":/work -w /work substrate-kernels-build \
             make all ARCH=${{ matrix.arch }} VARIANT=${{ matrix.variant }}
       - uses: actions/upload-artifact@v7
         with:
@@ -121,7 +121,7 @@ jobs:
           set -euo pipefail
           . scripts/kernel-pin.env
           cat > RELEASE_NOTES.md <<EOF
-          substrate-kernel \`$TAG\` — the pre-flattened \`.kernel\` bundles for substrate,
+          substrate-kernels \`$TAG\` — the pre-flattened \`.kernel\` bundles for substrate,
           built from the pinned **linux $VERSION** (sha256 \`$KERNEL_SHA256\`).
 
           **Artifacts:**
@@ -133,7 +133,7 @@ jobs:
 
           Builds are byte-reproducible, so each bundle's sha256 is a stable content
           identity. Also published to Cloudflare R2, served at
-          https://kernels.substrate.loopholelabs.io/linux-$VERSION-base-x86_64.kernel
+          https://kernels.substrate.so/linux-$VERSION-base-x86_64.kernel
           (and the matching debug/aarch64 bundles + \`linux-$VERSION-SHA256SUMS\`).
           EOF
       - name: Create or update the GitHub Release
@@ -154,7 +154,7 @@ jobs:
           else
             gh release create "$TAG" "${assets[@]}" \
               --repo "$GITHUB_REPOSITORY" \
-              --title "substrate-kernel $TAG (linux $VERSION)" \
+              --title "substrate-kernels $TAG (linux $VERSION)" \
               --notes-file RELEASE_NOTES.md
           fi
 

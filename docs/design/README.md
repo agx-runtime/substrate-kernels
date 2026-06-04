@@ -1,6 +1,6 @@
 # Design documents
 
-A **design document gates every build component.** substrate-kernel builds a guest
+A **design document gates every build component.** substrate-kernels builds a guest
 kernel from a pinned upstream tree (CLAUDE.md §1) rather than inheriting a distro
 kernel or a forked tree. The risk is that a from-scratch build silently drops a
 subtle correctness/boot detail — a config dependency, a boot-protocol field, a
@@ -32,4 +32,4 @@ table: *detail · convention · our handling · the locking gate*) → **Our des
 
 Every design doc, like every patch and config comment, is **substrate-native**: the
 bundle magic is `SUBK` and the packer is `pack-kernel`, both substrate's own names;
-the producer is substrate-kernel, the consumer is substrate.
+the producer is substrate-kernels, the consumer is substrate.

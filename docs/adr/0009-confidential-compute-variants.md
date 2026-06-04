@@ -40,7 +40,7 @@ secret-retrieval initrd from source is out of scope; we vendor known-good blobs.
    needs a minimal firmware stage and an initrd that performs early
    secret-retrieval/measurement before the rootfs is available. It ships
    these as committed binary blobs (no source). When the TEE variants are wired,
-   substrate-kernel vendors those same blobs, pinned by sha256 and recorded with
+   substrate-kernels vendors those same blobs, pinned by sha256 and recorded with
    their provenance, and passes them to the packer's `qboot`/`initrd` sections (ADR
    0003), which are **zero/absent for base builds** ([design/initramfs.md](../design/initramfs.md)).
 

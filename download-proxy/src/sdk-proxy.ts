@@ -1,6 +1,6 @@
 /**
  * First-party reverse proxy for the RudderStack v3 SDK. Same origin as the
- * listing page (kernels.agx.so / kernels.substrate.loopholelabs.io), so:
+ * listing page (kernels.agx.so / kernels.substrate.so), so:
  *
  *   - EasyPrivacy's `||rudderlabs.com^$third-party` rule (which blocks the
  *     stock CDN script when served to any non-rudderlabs.com page) cannot
@@ -135,7 +135,7 @@ function buildSourceConfig({ writeKey, hostname }: SourceConfigInput): string {
       name: hostname,
       writeKey,
       enabled: true,
-      workspaceId: 'substrate-kernel',
+      workspaceId: 'substrate-kernels',
       destinations: [],
       config: {
         statsCollection: {
@@ -150,13 +150,13 @@ function buildSourceConfig({ writeKey, hostname }: SourceConfigInput): string {
 }
 
 /**
- * Look up the `ANALYTICS_WRITE_KEYS` host→key map and return the set of
+ * Look up the `AGX_ANALYTICS_KEYS` host→key map and return the set of
  * acceptable writeKeys. Any of our configured per-host write keys is valid
  * for the source-config endpoint — write keys are not secrets (analytics
  * ADR 0010) and we just need to reject garbage / abusive lookups.
  */
 function knownWriteKeys(env: Env): Set<string> {
-  const raw = env.ANALYTICS_WRITE_KEYS;
+  const raw = env.AGX_ANALYTICS_KEYS;
   if (!raw) return new Set();
   let map: unknown;
   try {

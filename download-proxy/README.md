@@ -4,7 +4,7 @@ A thin Cloudflare Worker that serves the substrate-kernels R2 bucket at the
 public download hostnames and emits one `kernel_download` event per full
 download into the analytics events queue.
 
-- **Routes:** `kernels.substrate.loopholelabs.io/*` and `kernels.agx.so/*`
+- **Routes:** `kernels.substrate.so/*` and `kernels.agx.so/*`
   (both `custom_domain = true`).
 - **Origin:** R2 binding (`KERNELS` → bucket `substrate-kernels`), not S3.
   No SigV4 in the Worker, no egress fees inside the CF network.
@@ -50,6 +50,18 @@ bun install
 bunx wrangler deploy
 ```
 
+> **One-time migration (agx rebrand):** the Worker was renamed
+> `substrate-kernel-download-proxy` → `substrate-kernels-download-proxy` and
+> the first public hostname moved `kernels.substrate.loopholelabs.io` →
+> `kernels.substrate.so`. The first deploy under the new name creates a NEW
+> Worker; confirm the custom-domain takeover for `kernels.agx.so` when
+> wrangler prompts, then delete the old Worker
+> (`bunx wrangler delete --name substrate-kernel-download-proxy`). The
+> `substrate.so` zone must be active in this account before
+> `kernels.substrate.so` can attach, and that host's write key needs an
+> analytics-side `AGX_ANALYTICS_KEYS` KV record with
+> `source = "WEB:KERNELS.SUBSTRATE.SO"`.
+
 ### Prerequisites (one-time per Cloudflare account)
 
 The Worker MUST live in the **same Cloudflare account** as the analytics
@@ -61,7 +73,7 @@ supported. That same account already hosts:
 - The analytics workers (`analytics-ingest`, `analytics-consumer`) and
   their `analytics-events` + `analytics-events-dlq` queues.
 
-DNS for `kernels.substrate.loopholelabs.io` and `kernels.agx.so` is
+DNS for `kernels.substrate.so` and `kernels.agx.so` is
 configured once in the Cloudflare dashboard; `custom_domain = true` in
 `wrangler.toml` keeps them attached on subsequent deploys.
 
@@ -69,11 +81,11 @@ configured once in the Cloudflare dashboard; `custom_domain = true` in
 
 ```bash
 # Browseable listing page (the front door).
-curl -fsSL https://kernels.substrate.loopholelabs.io/ -o /dev/null
-curl -sI https://kernels.substrate.loopholelabs.io/ | grep -E 'HTTP|content-type|cache-control|etag'
+curl -fsSL https://kernels.substrate.so/ -o /dev/null
+curl -sI https://kernels.substrate.so/ | grep -E 'HTTP|content-type|cache-control|etag'
 
 # Direct artifact downloads.
-curl -fsSL -o /dev/null https://kernels.substrate.loopholelabs.io/linux-6.12.91-base-x86_64.kernel
+curl -fsSL -o /dev/null https://kernels.substrate.so/linux-6.12.91-base-x86_64.kernel
 curl -fsSL -o /dev/null https://kernels.agx.so/linux-6.12.91-base-aarch64.kernel
 ```
 
@@ -83,7 +95,7 @@ Then in ClickHouse (the analytics destination):
 SELECT received_at, source, anonymous_id, properties.package,
        properties.version, properties.bytes, ip_country, ip_org
 FROM events
-WHERE source IN ('WEB:KERNELS.SUBSTRATE.LOOPHOLELABS.IO', 'WEB:KERNELS.AGX.SO')
+WHERE source IN ('WEB:KERNELS.SUBSTRATE.SO', 'WEB:KERNELS.AGX.SO')
   AND event_name = 'kernel_download'
   AND received_at >= now() - INTERVAL 10 MINUTE
 ORDER BY received_at DESC

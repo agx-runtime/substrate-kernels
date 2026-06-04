@@ -9,9 +9,9 @@
  * The substrate-bench dashboard made three load-bearing UX choices that
  * diverge from its own Pencil design; we keep the same divergences:
  *   1. Header nav is just "GitHub" (drop Docs / Benchmarks / Blog).
- *   2. Footer left is `© 2026 Loophole Labs` as a single link; middle
- *      is the 3-item `status / privacy / terms` (no `changelog`); right
- *      is `hello@loopholelabs.io` as plain text.
+ *   2. Footer left is `© 2026 Loophole Labs` as a single link (to
+ *      agx.so); middle is the 3-item `status / privacy / terms` (no
+ *      `changelog`); right is `hello@agx.so` as plain text.
  *   3. The "Featured" card is server-curated (newest mainline), not
  *      derived from generic data — same shape as the bench dashboard's
  *      pinned `HEADLINE[]` array.
@@ -29,8 +29,8 @@ import {
 } from './listing.ts';
 import type { AnalyticsConfig } from './types.ts';
 
-const REPO_URL = 'https://github.com/loopholelabs/substrate-kernel';
-const ORG_URL = 'https://github.com/loopholelabs';
+const REPO_URL = 'https://github.com/agx-runtime/substrate-kernels';
+const ORG_URL = 'https://github.com/agx-runtime';
 const RELEASES_URL = `${REPO_URL}/releases`;
 const DESIGN_DOC_URL = `${REPO_URL}/blob/main/docs/design/build-pipeline.md`;
 
@@ -120,7 +120,7 @@ function renderHero(): string {
       </div>
       <a class="repolink" href="${esc(REPO_URL)}" target="_blank" rel="noopener">
         ${ICONS.github}
-        <span>loopholelabs/substrate-kernel</span>
+        <span>agx-runtime/substrate-kernels</span>
       </a>
     </div>
   </section>`;
@@ -277,7 +277,7 @@ function renderNotes(): string {
   return `<section class="notes">
     <div class="nL">
       ${ICONS.info}
-      <span>All kernels are reproducibly built. Source open at <a href="${esc(REPO_URL)}" target="_blank" rel="noopener">github.com/loopholelabs/substrate-kernel</a>.</span>
+      <span>All kernels are reproducibly built. Source open at <a href="${esc(REPO_URL)}" target="_blank" rel="noopener">github.com/agx-runtime/substrate-kernels</a>.</span>
     </div>
     <div class="nR">
       <a href="${esc(REPO_URL)}" target="_blank" rel="noopener">source ${ICONS.arrowUpRight}</a>
@@ -289,13 +289,13 @@ function renderNotes(): string {
 
 function renderFooter(): string {
   return `<footer class="site">
-    <div class="fleft"><a href="https://loopholelabs.io" target="_blank" rel="noopener">© 2026 Loophole Labs</a></div>
+    <div class="fleft"><a href="https://agx.so" target="_blank" rel="noopener">© 2026 Loophole Labs</a></div>
     <div class="fmid">
-      <a href="https://status.loopholelabs.io" target="_blank" rel="noopener">status</a>
-      <a href="https://loopholelabs.io/privacy" target="_blank" rel="noopener">privacy</a>
-      <a href="https://loopholelabs.io/terms" target="_blank" rel="noopener">terms</a>
+      <a href="https://status.agx.so" target="_blank" rel="noopener">status</a>
+      <a href="https://agx.so/privacy" target="_blank" rel="noopener">privacy</a>
+      <a href="https://agx.so/terms" target="_blank" rel="noopener">terms</a>
     </div>
-    <div class="fright">hello@loopholelabs.io</div>
+    <div class="fright">hello@agx.so</div>
   </footer>`;
 }
 

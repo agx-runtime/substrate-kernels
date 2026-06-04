@@ -3,7 +3,7 @@ import { cloudflareTest } from '@cloudflare/vitest-pool-workers';
 import { defineConfig } from 'vitest/config';
 
 /**
- * Tests for the substrate-kernel download proxy. Two shapes:
+ * Tests for the substrate-kernels download proxy. Two shapes:
  *
  *  - `test/router.test.ts`     — pure-function unit tests of the parser.
  *  - `test/integration.test.ts` — full fetch-handler test against a real

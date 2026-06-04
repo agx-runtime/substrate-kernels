@@ -21,7 +21,7 @@ producer↔consumer contract and is not redesigned casually.
 
 Constraints that shape the format:
 
-- It is the one contract shared between substrate-kernel (producer) and substrate
+- It is the one contract shared between substrate-kernels (producer) and substrate
   (consumer); it must be **versioned, fixed-size-header, and golden-tested**
   (CLAUDE.md §4, [testing/bundle-golden.md](../testing/bundle-golden.md)).
 - It must carry **everything substrate needs without parsing the kernel**:

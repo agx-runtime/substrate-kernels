@@ -58,7 +58,7 @@ capabilities function under the real hypervisor."
 ## Relationship to substrate's live-smoke
 
 substrate has its own live-smoke lane that boots a real guest under KVM/HVF. The
-two meet at the artifact: substrate's lane needs *a* kernel; substrate-kernel's
-boot-smoke proves *this* kernel boots. In practice the substrate-kernel artifact is
+two meet at the artifact: substrate's lane needs *a* kernel; substrate-kernels'
+boot-smoke proves *this* kernel boots. In practice the substrate-kernels artifact is
 the kernel substrate's live-smoke consumes, so the fixture pipelines are shared
 ([testing/strategy.md](strategy.md) platform matrix).

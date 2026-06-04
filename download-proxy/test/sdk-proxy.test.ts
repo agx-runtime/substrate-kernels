@@ -94,9 +94,9 @@ describe('serveSourceConfig', () => {
   const KEY_OTHER = 'other-write-key-xyz';
   const envWithKeys: Env = {
     ...env,
-    ANALYTICS_WRITE_KEYS: JSON.stringify({
+    AGX_ANALYTICS_KEYS: JSON.stringify({
       'kernels.agx.so': KEY,
-      'kernels.substrate.loopholelabs.io': KEY_OTHER,
+      'kernels.substrate.so': KEY_OTHER,
     }),
   };
 
@@ -146,15 +146,15 @@ describe('serveSourceConfig', () => {
     expect(await res.json()).toEqual({ error: 'missing writeKey' });
   });
 
-  it('returns 401 when ANALYTICS_WRITE_KEYS is unset', async () => {
-    const bareEnv: Env = { ...env, ANALYTICS_WRITE_KEYS: undefined };
+  it('returns 401 when AGX_ANALYTICS_KEYS is unset', async () => {
+    const bareEnv: Env = { ...env, AGX_ANALYTICS_KEYS: undefined };
     const res = serveSourceConfig(bareEnv, req(`?writeKey=${KEY}`));
     expect(res.status).toBe(401);
     expect(await res.json()).toEqual({ error: 'unknown writeKey' });
   });
 
-  it('returns 401 when ANALYTICS_WRITE_KEYS is malformed JSON', async () => {
-    const badEnv: Env = { ...env, ANALYTICS_WRITE_KEYS: '{not-json' };
+  it('returns 401 when AGX_ANALYTICS_KEYS is malformed JSON', async () => {
+    const badEnv: Env = { ...env, AGX_ANALYTICS_KEYS: '{not-json' };
     const res = serveSourceConfig(badEnv, req(`?writeKey=${KEY}`));
     expect(res.status).toBe(401);
   });

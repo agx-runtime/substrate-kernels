@@ -10,7 +10,7 @@
 
 release.yml uploads `.kernel` bundles and the per-version `SHA256SUMS` to
 the `substrate-kernels` Cloudflare R2 bucket, which is served publicly at
-`https://kernels.substrate.loopholelabs.io/<filename>` and
+`https://kernels.substrate.so/<filename>` and
 `https://kernels.agx.so/<filename>` ([README §Releases](../../README.md)).
 Today both hostnames are bound directly to the bucket via a custom domain
 — no Worker in front. That gives us **zero observability of who downloads
@@ -25,7 +25,7 @@ shared analytics queue, with `request.cf` enrichment for IP / ASN /
 country / city (analytics
 [docs/spec/queue-protocol.md](https://github.com/loopholelabs/analytics/blob/main/docs/spec/queue-protocol.md)).
 
-Adding a Worker is a new component in substrate-kernel's repo — its first
+Adding a Worker is a new component in substrate-kernels' repo — its first
 TypeScript artifact. CLAUDE.md §7 requires an ADR for the decision and a
 design doc for the component, both landing in the same change as the
 implementation; CLAUDE.md §10 requires the doc-manifest gate to include
@@ -45,7 +45,7 @@ repo and referenced here only as a dependency.
    code rarely changes; kernel releases happen on tag pushes).
 
 2. **The Worker is bound to both
-   `kernels.substrate.loopholelabs.io` and `kernels.agx.so`** via
+   `kernels.substrate.so` and `kernels.agx.so`** via
    `custom_domain = true` routes. Same hostnames the README already
    documents — no client URL change. Direct R2 S3 URLs continue to work
    as a break-glass for ops; only the public hostnames now go through
@@ -122,7 +122,7 @@ repo and referenced here only as a dependency.
   source-link to this repo — we are reproducibly built, not cosign-
   signed (yet). [design/download-proxy.md](../design/download-proxy.md)
   "Listing page" is authoritative.
-- **substrate-kernel grows a TypeScript subtree.** Self-contained under
+- **substrate-kernels grows a TypeScript subtree.** Self-contained under
   `download-proxy/`; its tests (`bun test`) and deploy (`bunx wrangler
   deploy`) live there and don't touch the Makefile. The existing `make
   ci` doc-manifest gate now also enforces the ADR + design-doc additions.

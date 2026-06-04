@@ -20,7 +20,7 @@ We want three things:
    and download-click intent — in the same analytics pipeline the proxy already
    writes to.
 2. **A `source` that names the site** so dashboards can slice per-domain (the proxy
-   answers on two hostnames, `kernels.substrate.loopholelabs.io` and
+   answers on two hostnames, `kernels.substrate.so` and
    `kernels.agx.so`).
 3. **Correlation** between the page's "download click" and the proxy's actual
    `kernel_download` byte-transfer event — and the ability for the CLI to tag its
@@ -52,13 +52,13 @@ Two facts shape the design:
    surfaces:
    - **Page SDK events:** each hostname has its own write key, whose analytics-side
      KV record is `{ source: "WEB:<HOST>", enabled: true }`. The Worker injects the
-     write key for the request host from the `ANALYTICS_WRITE_KEYS` var.
+     write key for the request host from the `AGX_ANALYTICS_KEYS` var.
    - **Proxy server event:** the `kernel_download` producer stamps the same string,
      derived from the request host ([ADR 0011](0011-download-proxy-with-analytics.md) §4).
 
    They match per host by construction. `event_name` distinguishes the page's click
    intent (`kernel_download_click`) from the server's byte transfer
-   (`kernel_download`). `WEB:KERNELS.SUBSTRATE.LOOPHOLELABS.IO` is 37 bytes — well
+   (`kernel_download`). `WEB:KERNELS.SUBSTRATE.SO` is 24 bytes — well
    within the analytics `MAX_SOURCE_LENGTH` (64).
 
 3. **Correlate via a same-origin first-party cookie.** After the SDK is ready the
@@ -77,7 +77,7 @@ Two facts shape the design:
    is ignored so a malformed input never poisons the column.
 
 5. **Per-host write keys live in `[vars]`, not code.** `ANALYTICS_DATA_PLANE_URL`
-   and `ANALYTICS_WRITE_KEYS` (a JSON `hostname → write key` map) are Worker vars.
+   and `AGX_ANALYTICS_KEYS` (a JSON `hostname → write key` map) are Worker vars.
    Write keys are not secrets (analytics ADR 0010), so `[vars]` is the right home,
    and the SDK config is changeable without a code edit. The page HTML embeds a
    per-host write key, so the host is folded into the listing ETag.
@@ -149,7 +149,7 @@ Two facts shape the design:
    and the worker forwards to `${ANALYTICS_DATA_PLANE_URL}/v1/batch`
    server-side (no CORS — Worker-to-Worker fetch, no browser involvement).
    The analytics ingest only needs (a) a web write key per domain in its
-   `WRITE_KEYS` KV mapped to `WEB:<HOST>`. The earlier CORS contract
+   `AGX_ANALYTICS_KEYS` KV mapped to `WEB:<HOST>`. The earlier CORS contract
    (commit `012c7c5`) is no longer load-bearing for this page, though it
    remains useful for other consumers.
 
@@ -165,7 +165,7 @@ Two facts shape the design:
 - **CLI downloads are taggable.** A CLI that sets `X-Substrate-Anonymous-Id` ties its
   downloads to its own machine identity.
 - **A standing external dependency.** The analytics-side CORS + write keys + source
-  config must exist for the SDK to emit; the substrate-kernel side is built to no-op
+  config must exist for the SDK to emit; the substrate-kernels side is built to no-op
   cleanly until they do. This is the same shape of cross-repo coupling ADR 0011
   already accepts (the queue contract), now extended to the browser ingest path.
 - **`source` semantics changed for the proxy event** — it was an implicit constant

@@ -12,7 +12,7 @@
 
 ## Context
 
-substrate-kernel builds **a specific upstream Linux release**, not a moving
+substrate-kernels builds **a specific upstream Linux release**, not a moving
 branch. Everything downstream — the patch series applying clean (CLAUDE.md §6),
 the config normalizing the same way, and above all the byte-reproducibility law
 (CLAUDE.md §3) — is rooted in *which exact source tree* we build. An unpinned or

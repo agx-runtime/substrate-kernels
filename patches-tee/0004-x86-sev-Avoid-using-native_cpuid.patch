@@ -3,7 +3,7 @@ From: Sergio Lopez <slp@redhat.com>
 Date: Wed, 5 Jun 2024 16:20:08 +0200
 Subject: [PATCH 4/4] x86/sev: Avoid using native_cpuid
 
-In the state we get into the kernel from qboot-substrate-kernel we can't return
+In the state we get into the kernel from qboot-substrate-kernels we can't return
 from #VC properly, so avoid calling native_cpuid in the early stages
 of the boot process.
 

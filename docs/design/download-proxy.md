@@ -11,7 +11,7 @@ every claim below.
 
 `release.yml` publishes `linux-<version>-<variant>-<arch>.kernel` bundles
 and a per-version `SHA256SUMS` to the `substrate-kernels` R2 bucket, which
-the README documents as served at `kernels.substrate.loopholelabs.io` and
+the README documents as served at `kernels.substrate.so` and
 `kernels.agx.so` ([../../README.md](../../README.md) §Releases). The proxy
 sits between those hostnames and the bucket: reads R2 via binding, writes
 one event per full download into the analytics events queue
@@ -37,11 +37,11 @@ the producer is hand-rolled per that spec in
 | **Path-shape validation must reject everything that isn't a known artifact** — defense in depth against R2-key probing | tolerant glob over the bucket | pure `parsePath` with two anchored regexes; unknown shapes return 404 BEFORE any R2 read | `test/router.test.ts` covers traversal, query-string bait, wrong extension, casing |
 | **Shape drift between `src/analytics.ts` and `analytics/docs/spec/queue-protocol.md`** — no compile-time link between the two repos | trust the doc and hope | `test/integration.test.ts` asserts every spec-required field on the emitted `QueueEvent` (source, event_name, the dual-ID nulls, the ip_* enrichment surface, the properties shape) — a spec change that breaks the consumer fails this test before deploy | the integration test |
 | **Public + unauthenticated** — one chatty IP can chew CPU/request quota and bloat the analytics queue (one event per full GET) | no limiter | per-IP rate limit via the Workers Rate Limiting binding (`DOWNLOAD_RATE_LIMITER_IP`, 60 req/min, keyed on `CF-Connecting-IP`). Checked BEFORE routing so scan traffic on garbage paths also counts. `429` + `Retry-After: 60` on deny; no analytics emit on a rate-limited request | `test/integration.test.ts` "returns 429 + Retry-After when the per-IP rate limit denies" |
-| **`/` was a dead 404** — bucket is the public face of the kernel artifacts; users hit `kernels.substrate.loopholelabs.io` and saw nothing | redirect to GitHub releases | `GET /` SSRs a browseable listing of the bucket (`src/html.ts` + `src/listing.ts`). 5-min `Cache-Control` + ETag on the response. Visual identity mirrors `agx/substrate/tools/bench/dashboard/index.html` (same CSS variables, fonts, header/footer pattern) and applies the same three substrate-bench "decisions": header nav is just GitHub, footer middle is 3 items (no `changelog`), Featured card is server-curated to the newest mainline version | `test/integration.test.ts` `GET / → 200 HTML listing` |
+| **`/` was a dead 404** — bucket is the public face of the kernel artifacts; users hit `kernels.substrate.so` and saw nothing | redirect to GitHub releases | `GET /` SSRs a browseable listing of the bucket (`src/html.ts` + `src/listing.ts`). 5-min `Cache-Control` + ETag on the response. Visual identity mirrors `agx/substrate/tools/bench/dashboard/index.html` (same CSS variables, fonts, header/footer pattern) and applies the same three substrate-bench "decisions": header nav is just GitHub, footer middle is 3 items (no `changelog`), Featured card is server-curated to the newest mainline version | `test/integration.test.ts` `GET / → 200 HTML listing` |
 | **`source` should name the site for per-domain slicing** ([ADR 0012](../adr/0012-listing-page-web-analytics-and-correlation.md)) | a fixed producer label | `source = WEB:<HOSTNAME UPPERCASE>` on **both** the proxy event (derived from the request host) and the page SDK events (via the per-host write key → KV mapping); they match per host. `event_name` distinguishes `kernel_download` (server) from `kernel_download_click` (web) | `test/integration.test.ts` asserts `source = WEB:<HOST>` |
 | **The proxy event's `anonymous_id` was a throwaway** — nothing could be tied to it | fresh random per download | resolve `X-Substrate-Anonymous-Id` header (CLI) → `substrate_aid` cookie (browser) → fresh UUID; a supplied id must be ≤128 chars + `[A-Za-z0-9._:-]` or it is ignored (never poisons the column) | `test/integration.test.ts` header / cookie / header-beats-cookie / malformed-fallback |
 | **Correlating a page download-click with the actual transfer** without an id in the URL | redirect with the id in the query string (cache fragmentation) | the listing page + the proxy are **same origin**, so a first-party `substrate_aid` cookie (set from the SDK's `getAnonymousId()`) rides the same-origin download navigation; the proxy reads it. No URL change, no edge-cache fragmentation | end-to-end (ClickHouse join on `anonymous_id`); cookie-read covered by the integration test |
-| **The listing page had no visit analytics** | none | `GET /` injects the RudderStack v3 SDK (cloud-mode) pointed at `ANALYTICS_DATA_PLANE_URL`, with the per-host write key from `ANALYTICS_WRITE_KEYS`; fires `page` / `kernel_search` / `kernel_download_click` / `sha256sums_download`. Injected only when a write key is configured for the host — else the page renders without it (graceful) | `test/integration.test.ts` "GET / with a write key configured" / "does NOT inject … no mapped write key" |
+| **The listing page had no visit analytics** | none | `GET /` injects the RudderStack v3 SDK (cloud-mode) pointed at `ANALYTICS_DATA_PLANE_URL`, with the per-host write key from `AGX_ANALYTICS_KEYS`; fires `page` / `kernel_search` / `kernel_download_click` / `sha256sums_download`. Injected only when a write key is configured for the host — else the page renders without it (graceful) | `test/integration.test.ts` "GET / with a write key configured" / "does NOT inject … no mapped write key" |
 | **EasyPrivacy blocks `\|\|rudderlabs.com^$third-party`** — the stock SDK CDN load is blocked by default-uBlock / Brave Shields | load directly from `cdn.rudderlabs.com` | reverse-proxy on this Worker's origin under `/_data/`: `client.min.js` → `cdn.rudderlabs.com/<pinned>/<build>/rsa.min.js`; `p/<file>` → the lazy plugin chunks (`sdk-proxy.ts`). Loader overrides `sdkBaseUrl`/`sdkName`/`pluginsSDKBaseURL` so every SDK URL stays first-party | `test/integration.test.ts` "/_data/modern/client.min.js → proxies cdn.rudderlabs.com" + HTML has no `cdn.rudderlabs.com`/`api.rudderstack.com`/`rsa.min.js` |
 | **Stock `load()` fetches source config from `api.rudderstack.com/sourceConfig` → 400 "Invalid write key"** — RudderStack's hosted control plane doesn't know our KV writeKeys | accept that as a hard failure | synthesize the response in `sdk-proxy.ts::serveSourceConfig`; minimum shape per `rudder-sdk-js`'s own `isValidSourceConfig` (`source.id` + `source.config` object + `source.destinations` array); mirror the SDK team's mock control-plane to silence error-reporting + metrics paths | `test/sdk-proxy.test.ts` source-config shape; `test/integration.test.ts` known/unknown/missing writeKey |
 | **SDK's default `XhrQueue` posts per-event to `${dataPlane}/v1/<type>`** (not `/v1/batch`) — our analytics ingest only accepts `/v1/batch` and only sets CORS for that path, so the stock `dataPlaneUrl=https://data.agx.so` configuration: (a) gets CORS-blocked on the preflight to `data.agx.so/v1/page`, and (b) 404s on the upstream path | accept the per-event POST shape | set the SDK's `dataPlaneUrl` to `window.location.origin + "/_data"` (same-origin = no CORS); the worker rewrites every `/_data/v1/<type>` POST to `${ANALYTICS_DATA_PLANE_URL}/v1/batch` (`proxyAnalyticsIngest`), forwarding `Authorization`, `Content-Type`, and `CF-Connecting-IP`, propagating upstream status so `RetryQueue` can retry 5xx | `test/integration.test.ts` `/_data/v1/page` rewrite, header forwarding, status propagation, POST-only |
@@ -115,7 +115,7 @@ divergences so the two pages share an identity:
 
 | Section | Pencil design | Both pages |
 |---|---|---|
-| Header nav | 4 items (Docs / Benchmarks / Blog / GitHub or +Kernels) | Only `GitHub` (link to https://github.com/loopholelabs) |
+| Header nav | 4 items (Docs / Benchmarks / Blog / GitHub or +Kernels) | Only `GitHub` (link to https://github.com/agx-runtime) |
 | Footer left | "© 2026" + "Loophole Labs" as two nodes | `© 2026 Loophole Labs` as a single link |
 | Footer middle | `status / changelog / privacy / terms` (4 items) | `status / privacy / terms` (3 items; `changelog` dropped) |
 | Top summary | Generic 4-card grid | Server-curated: bench pins `HEADLINE[]`, kernels pins `featured` = newest mainline |
@@ -127,7 +127,7 @@ built and signed with cosign." We are NOT cosign-signing yet, so the
 copy swaps the signature claim for a link to the source:
 
 > All kernels are reproducibly built. Source open at
-> [github.com/loopholelabs/substrate-kernel](https://github.com/loopholelabs/substrate-kernel).
+> [github.com/agx-runtime/substrate-kernels](https://github.com/agx-runtime/substrate-kernels).
 
 Same substitution in the Featured card's mini-nav — `signature` →
 `source`. The link goes in the same slot the cosign reference would
@@ -190,7 +190,7 @@ immediately; failures are logged to `console.error` and swallowed.
 `GET /` injects the RudderStack v3 SDK (cloud-mode) into `<head>` via a
 **same-origin reverse proxy** when a write key is configured for the request
 host. `download-proxy/src/index.ts` `resolveAnalytics(env, hostname)` reads
-`ANALYTICS_DATA_PLANE_URL` and the `ANALYTICS_WRITE_KEYS` `hostname → write
+`ANALYTICS_DATA_PLANE_URL` and the `AGX_ANALYTICS_KEYS` `hostname → write
 key` map; `renderAnalytics` (`src/html.ts`) emits the loader (with overridden
 `sdkBaseUrl` / `sdkName` / `configUrl` / `pluginsSDKBaseURL`) or nothing
 (graceful). The write key sets `source = WEB:<HOST>` on the analytics side,
@@ -242,7 +242,7 @@ and a fresh UUID is used.
 `data.agx.so` directly — events ride the same-origin `/_data/v1/<type>`
 route and the worker forwards Worker-to-Worker to
 `${ANALYTICS_DATA_PLANE_URL}/v1/batch`. The analytics ingest only needs (a) a
-web write key per domain in the `WRITE_KEYS` KV mapped to `WEB:<HOST>`;
+web write key per domain in the `AGX_ANALYTICS_KEYS` KV mapped to `WEB:<HOST>`;
 until a write key is configured for the request host, the page renders
 without the SDK (graceful). The CORS contract on `data.agx.so` (commit
 `012c7c5`) is no longer load-bearing for this page.
@@ -261,9 +261,9 @@ lists ever add a `rsa-plugins` rule.
 - `[[unsafe.bindings]]` `DOWNLOAD_RATE_LIMITER_IP` → Rate Limiting
   binding (60 req/min/IP).
 - `[vars]` `ANALYTICS_DATA_PLANE_URL` (`https://data.agx.so`) and
-  `ANALYTICS_WRITE_KEYS` (a JSON `hostname → write key` map; write keys are
+  `AGX_ANALYTICS_KEYS` (a JSON `hostname → write key` map; write keys are
   not secrets per analytics ADR 0010). Absent / unmatched host → no SDK.
-- `[[routes]]` `kernels.substrate.loopholelabs.io` and `kernels.agx.so`,
+- `[[routes]]` `kernels.substrate.so` and `kernels.agx.so`,
   both `custom_domain = true` (bare hostname, no `/*`).
 - `[observability.logs]` + `[observability.traces]` enabled with
   persistence (mirrors `agx/cloud/local-certificates`).

@@ -1,8 +1,8 @@
-# Substrate Linux Kernel
+# Substrate Linux Kernels
 
-**Substrate Kernel** is the build system that produces the `.kernel` artifact — the
+**Substrate Kernels** is the build system that produces the `.kernel` artifact — the
 minimal, virtio-only Linux guest kernel that
-[**substrate**](https://github.com/loopholelabs/substrate) (our embedded microVM
+[**substrate**](https://github.com/agx-runtime/substrate) (our embedded microVM
 monitor) mmaps and boots inside a guest. It pins a Linux source tree, applies a
 curated patch series, builds it with a monolithic per-`(arch, variant)` config, and
 packs the result into a single self-contained **kernel bundle** (`SUBK`) that
@@ -74,7 +74,7 @@ loader adopting the `SUBK` format; until then CI boots the produced kernel under
 
 Release artifacts are the `.kernel` bundles plus a `SHA256SUMS` file, published to
 **GitHub Releases** and mirrored to **Cloudflare R2**, served publicly at
-`https://kernels.substrate.loopholelabs.io/` and `https://kernels.agx.so/` via the
+`https://kernels.substrate.so/` and `https://kernels.agx.so/` via the
 [`download-proxy/`](download-proxy/) Worker — a thin CF Worker that reads R2 via a
 binding and emits one analytics event per full download
 ([ADR 0011](docs/adr/0011-download-proxy-with-analytics.md)). Same public URLs,
@@ -88,7 +88,7 @@ same paths; observability is new.
   (optionally with a `revision`). The workflow builds `base × {x86_64, aarch64}`,
   writes `SHA256SUMS`, creates the GitHub Release, and uploads to R2.
 - **Public URLs** (bucket root): each bundle is served at
-  `https://kernels.substrate.loopholelabs.io/linux-<version>-base-<arch>.kernel`,
+  `https://kernels.substrate.so/linux-<version>-base-<arch>.kernel`,
   with checksums at `…/linux-<version>-SHA256SUMS`. Configure the repo **secret**
   `CLOUDFLARE_API_TOKEN` and the repo **variables** `CLOUDFLARE_ACCOUNT_ID` +
   `R2_BUCKET` (R2 upload is skipped if the token is unset, so the GitHub Release

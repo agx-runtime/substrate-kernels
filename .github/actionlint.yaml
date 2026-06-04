@@ -1,4 +1,4 @@
-# Namespace (nscloud) runner + feature labels used across substrate-kernel's
+# Namespace (nscloud) runner + feature labels used across substrate-kernels'
 # workflows, declared so actionlint doesn't flag them as unknown GitHub-hosted
 # labels. Labels that embed an expression — the `…-with-cache;github.run-id=${{
 # github.run_id }}` cache shapes — are dynamic and need no entry (actionlint skips
@@ -10,8 +10,8 @@ self-hosted-runner:
     # The cache volume size — provisions the per-tag cache volume on first use.
     - nscloud-cache-size-50gb
     # Cache-scoping tags, one per arch (each arch builds natively on its own runner).
-    - nscloud-cache-tag-substrate-kernel-amd64
-    - nscloud-cache-tag-substrate-kernel-arm64
+    - nscloud-cache-tag-substrate-kernels-amd64
+    - nscloud-cache-tag-substrate-kernels-arm64
     # Persists the pinned toolchain container image across runs (fast `docker build`).
     - nscloud-container-image-cache
     # Privileged container so the Docker lanes (config / build / repro-check) can run

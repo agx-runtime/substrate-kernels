@@ -1,12 +1,12 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
-From: substrate <substrate-kernel@loopholelabs.io>
+From: substrate <substrate-kernels@agx.so>
 Date: Mon, 18 May 2026 00:00:00 +0000
 Subject: [PATCH] virtio_fs: NULL fs->vqs and fs->mq_map after kfree in setup_vqs
 
 See inline comments.
 (x86 ACPI VMGENID wiring).
 
-Signed-off-by: substrate <substrate-kernel@loopholelabs.io>
+Signed-off-by: substrate <substrate-kernels@agx.so>
 ---
 diff --git a/fs/fuse/virtio_fs.c b/fs/fuse/virtio_fs.c
 index c81f7b888..199ed474d 100644

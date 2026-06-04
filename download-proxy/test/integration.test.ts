@@ -28,9 +28,9 @@ const FIXTURE_KEY = 'linux-6.12.91-base-x86_64.kernel';
 // Tiny deterministic payload — large enough to make Content-Length / Range
 // asserts meaningful, small enough to print on a failure without flooding.
 const FIXTURE_BODY = new Uint8Array(64).map((_, i) => (i * 7 + 3) & 0xff);
-// makeRequest uses the kernels.substrate.loopholelabs.io host, so the
+// makeRequest uses the kernels.substrate.so host, so the
 // server-side download event's source is WEB:<that host, uppercased>.
-const EXPECTED_SOURCE = 'WEB:KERNELS.SUBSTRATE.LOOPHOLELABS.IO';
+const EXPECTED_SOURCE = 'WEB:KERNELS.SUBSTRATE.SO';
 
 interface SendStub {
   sent: unknown[];
@@ -51,7 +51,7 @@ function stubQueue(): SendStub {
 }
 
 function makeRequest(method: string, path: string, headers: HeadersInit = {}): Request {
-  const req = new Request(`https://kernels.substrate.loopholelabs.io${path}`, {
+  const req = new Request(`https://kernels.substrate.so${path}`, {
     method,
     // CF-Connecting-IP keys the per-IP rate limiter. A fresh IP per test
     // method means the existing cases never trip the limiter; the
@@ -318,22 +318,22 @@ describe('download-proxy fetch', () => {
       // Page structure
       expect(body).toContain('<title>Substrate — Kernels</title>');
       expect(body).toContain('Kernels'); // <h1>
-      expect(body).toContain('substrate-kernel-download-proxy'.split('-')[0]); // 'substrate'
+      expect(body).toContain('substrate-kernels-download-proxy'.split('-')[0]); // 'substrate'
       // Listed artifacts — every key should appear as a download href
       expect(body).toContain(`href="/${X86_KEY}"`);
       expect(body).toContain(`href="/${ARM_KEY}"`);
       // Per-row sha256 link points at the SHA256SUMS for this version
       expect(body).toContain(`href="/${SUMS_KEY}"`);
       // Bench-decision: header nav is just GitHub
-      expect(body).toMatch(/<nav class="top">\s*<a [^>]*github\.com\/loopholelabs[^"]*"[^>]*>GitHub<\/a>\s*<\/nav>/);
+      expect(body).toMatch(/<nav class="top">\s*<a [^>]*github\.com\/agx-runtime[^"]*"[^>]*>GitHub<\/a>\s*<\/nav>/);
       // Bench-decision: footer middle is 3 items, no `changelog`
       expect(body).not.toMatch(/changelog/i);
-      expect(body).toMatch(/status\.loopholelabs\.io/);
-      expect(body).toMatch(/loopholelabs\.io\/privacy/);
-      expect(body).toMatch(/loopholelabs\.io\/terms/);
+      expect(body).toMatch(/status\.agx\.so/);
+      expect(body).toMatch(/agx\.so\/privacy/);
+      expect(body).toMatch(/agx\.so\/terms/);
       // Cosign claim replaced by source link
       expect(body).not.toMatch(/cosign/i);
-      expect(body).toMatch(/github\.com\/loopholelabs\/substrate-kernel/);
+      expect(body).toMatch(/github\.com\/agx-runtime\/substrate-kernels/);
       // No analytics vars configured here → the SDK loader is NOT injected.
       // (Stable presence markers: the loader URL we'd build, the load() call,
       // and the renamed client filename.)
@@ -353,8 +353,8 @@ describe('download-proxy fetch', () => {
         ...env,
         EVENTS_QUEUE: queue as unknown as Env['EVENTS_QUEUE'],
         ANALYTICS_DATA_PLANE_URL: 'https://data.agx.so',
-        ANALYTICS_WRITE_KEYS: JSON.stringify({
-          'kernels.substrate.loopholelabs.io': 'test-web-key',
+        AGX_ANALYTICS_KEYS: JSON.stringify({
+          'kernels.substrate.so': 'test-web-key',
         }),
       };
 
@@ -392,7 +392,7 @@ describe('download-proxy fetch', () => {
         EVENTS_QUEUE: queue as unknown as Env['EVENTS_QUEUE'],
         ANALYTICS_DATA_PLANE_URL: 'https://data.agx.so',
         // Map a DIFFERENT host — the request host has no key, so no SDK.
-        ANALYTICS_WRITE_KEYS: JSON.stringify({ 'kernels.agx.so': 'other-key' }),
+        AGX_ANALYTICS_KEYS: JSON.stringify({ 'kernels.agx.so': 'other-key' }),
       };
 
       const req = makeRequest('GET', '/');
@@ -450,8 +450,8 @@ describe('download-proxy fetch', () => {
     const WRITE_KEY = 'kernels-substrate-key';
     const envWithKeys: Env = {
       ...env,
-      ANALYTICS_WRITE_KEYS: JSON.stringify({
-        'kernels.substrate.loopholelabs.io': WRITE_KEY,
+      AGX_ANALYTICS_KEYS: JSON.stringify({
+        'kernels.substrate.so': WRITE_KEY,
       }),
     };
 

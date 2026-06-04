@@ -1,5 +1,5 @@
 {
-  "name": "substrate-kernel-download-proxy",
+  "name": "substrate-kernels-download-proxy",
   "version": "0.1.0",
   "private": true,
   "type": "module",

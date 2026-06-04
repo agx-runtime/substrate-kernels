@@ -1,9 +1,9 @@
 /**
- * `kernel_download` event producer for the substrate-kernel download proxy.
+ * `kernel_download` event producer for the substrate-kernels download proxy.
  *
  * Hand-rolled per the analytics queue contract at
  *   https://github.com/loopholelabs/analytics/blob/main/docs/spec/queue-protocol.md
- * (private repo; substrate-kernel does NOT take a package dependency on
+ * (private repo; substrate-kernels does NOT take a package dependency on
  * the analytics monorepo — bun 1.3.x cannot authenticate private GitHub
  * git installs, and the analytics ADR 0015 explicitly endorses the
  * hand-roll path as first-class: "the spec is authoritative; a

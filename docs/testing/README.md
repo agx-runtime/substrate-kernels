@@ -1,6 +1,6 @@
 # Verification toolkit
 
-How substrate-kernel proves a build is correct. A kernel *build* fails differently
+How substrate-kernels proves a build is correct. A kernel *build* fails differently
 from a Rust library — there are no unit tests of pure functions to run — so the
 gates are build-shaped: they check that the inputs assemble correctly and that the
 output actually boots. But the philosophy is substrate's (CLAUDE.md §3, §8):

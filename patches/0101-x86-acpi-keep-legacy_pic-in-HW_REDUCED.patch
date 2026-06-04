@@ -1,12 +1,12 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
-From: substrate <substrate-kernel@loopholelabs.io>
+From: substrate <substrate-kernels@agx.so>
 Date: Mon, 18 May 2026 00:00:00 +0000
 Subject: [PATCH] x86/acpi: keep default_legacy_pic alive in HW_REDUCED mode
 
 See inline comments.
 (x86 ACPI VMGENID wiring).
 
-Signed-off-by: substrate <substrate-kernel@loopholelabs.io>
+Signed-off-by: substrate <substrate-kernels@agx.so>
 ---
 diff --git a/arch/x86/kernel/acpi/boot.c b/arch/x86/kernel/acpi/boot.c
 index a1acff778..be207cd5d 100644

@@ -8,13 +8,13 @@
 
 ## Context
 
-The producer (substrate-kernel) and the consumer (substrate) must agree on exactly
+The producer (substrate-kernels) and the consumer (substrate) must agree on exactly
 how the guest kernel is loaded and entered. There are two opposing models:
 
 - **Pre-flattened bundle**: the build flattens the kernel into a raw load image and
   records `load_addr` / `entry_addr` in a header; substrate copies the payload and
   jumps, with **no kernel-image parser**.
-- **Raw standard image**: substrate-kernel ships a stock bzImage / Image and
+- **Raw standard image**: substrate-kernels ships a stock bzImage / Image and
   substrate parses it at runtime (the model substrate's early `docs/design/boot.md`
   sketched, mirroring rust-vmm's `linux-loader`).
 

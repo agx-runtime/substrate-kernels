@@ -1,6 +1,6 @@
 # Architecture
 
-How substrate-kernel is structured: the build pipeline that turns a pinned Linux
+How substrate-kernels is structured: the build pipeline that turns a pinned Linux
 source tree into a `.kernel` bundle, the components of that pipeline, the
 architecture × variant matrix, the boot contract with substrate, and the build
 roadmap. Read [CLAUDE.md](../CLAUDE.md) first; it is the binding law (the artifact
@@ -147,7 +147,7 @@ Two artifact budgets are tracked, both as review signals rather than hard gates:
   in the boot-smoke lane ([testing/boot-smoke.md](testing/boot-smoke.md)).
 
 (These replace what a Rust VMM would track as data-plane performance;
-substrate-kernel produces a static artifact, so the budgets are about the artifact,
+substrate-kernels produces a static artifact, so the budgets are about the artifact,
 not a running hot path. This is why this repo has no `performance/` or
 `instrumentation/` tree — those describe a running monitor, not a build output.)
 

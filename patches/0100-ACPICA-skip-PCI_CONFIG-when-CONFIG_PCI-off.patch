@@ -1,12 +1,12 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
-From: substrate <substrate-kernel@loopholelabs.io>
+From: substrate <substrate-kernels@agx.so>
 Date: Mon, 18 May 2026 00:00:00 +0000
 Subject: [PATCH] ACPICA: skip PCI_CONFIG default region handler when CONFIG_PCI=n
 
 See inline comments.
 (x86 ACPI VMGENID wiring).
 
-Signed-off-by: substrate <substrate-kernel@loopholelabs.io>
+Signed-off-by: substrate <substrate-kernels@agx.so>
 ---
 diff --git a/drivers/acpi/acpica/evhandler.c b/drivers/acpi/acpica/evhandler.c
 index 1c8cb6d92..935708ce2 100644

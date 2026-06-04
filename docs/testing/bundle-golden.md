@@ -4,7 +4,7 @@ Golden tests that lock the bundle's byte layout so format drift fails the build.
 The bundle header is the one contract shared with substrate
 ([ADR 0003](../adr/0003-kernel-bundle-format.md)); an accidental field reorder,
 size change, or alignment slip would silently mis-parse on the consumer. This is
-substrate-kernel's analogue of substrate's `insta` golden tests.
+substrate-kernels' analogue of substrate's `insta` golden tests.
 
 ## What it locks
 

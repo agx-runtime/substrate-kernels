@@ -1,4 +1,4 @@
-# substrate-kernel — build a pre-flattened .kernel bundle from a pinned Linux tree.
+# substrate-kernels — build a pre-flattened .kernel bundle from a pinned Linux tree.
 #
 # Pipeline (architecture.md §2): pin → tarball (verify sha256) → source → patched →
 # configured (olddefconfig + invariant gate) → compiled → bundle (pack-kernel).
@@ -23,6 +23,10 @@ ABI_VERSION         ?= 1
 JOBS                ?= $(shell nproc 2>/dev/null || echo 4)
 KBUILD_BUILD_TIMESTAMP ?= Fri May  8 14:25:15 CEST 2026
 KBUILD_BUILD_USER   ?= root
+# Frozen at the historical name deliberately: this string is baked into every
+# kernel image (LINUX_COMPILE_HOST), so renaming it changes the bytes — and the
+# sha256 — of a rebuild of an already-released version (ADR 0005 / CLAUDE.md §3).
+# Rename to substrate-kernels at the next pin bump, when the bytes change anyway.
 KBUILD_BUILD_HOST   ?= substrate-kernel
 export KBUILD_BUILD_TIMESTAMP KBUILD_BUILD_USER KBUILD_BUILD_HOST
 
@@ -30,7 +34,7 @@ export KBUILD_BUILD_TIMESTAMP KBUILD_BUILD_USER KBUILD_BUILD_HOST
 VARIANT  ?= base
 HOSTARCH := $(shell uname -m)
 ARCH     ?= $(HOSTARCH)
-# Normalize arch aliases to the substrate-kernel arch id.
+# Normalize arch aliases to the substrate-kernels arch id.
 ifeq ($(ARCH),arm64)
   GUESTARCH := aarch64
 else ifeq ($(ARCH),riscv)
@@ -77,7 +81,7 @@ ifneq ($(filter $(VARIANT),sev tdx),)
   PATCHES += $(sort $(wildcard patches-tee/*.patch))
 endif
 
-IMAGE := substrate-kernel-build
+IMAGE := substrate-kernels-build
 UNAME_S := $(shell uname -s)
 
 .PHONY: all image build install clean ci repro-check \

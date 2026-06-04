@@ -76,7 +76,7 @@ set. We still need a principle that makes a carried-but-unwired driver safe.
 ## Consequences
 
 - The kernel supports substrate's full feature contract (including TSI and optional
-  virtio-fs mounts) without substrate-kernel tracking which devices a given
+  virtio-fs mounts) without substrate-kernels tracking which devices a given
   substrate build happens to wire.
 - A carried-but-unwired driver cannot widen the *host* attack surface, because the
   host surface is the set of *devices substrate instantiates*, which the embedder

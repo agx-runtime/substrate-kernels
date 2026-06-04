@@ -1,6 +1,6 @@
 name: CI
 
-# Gates for the substrate-kernel build (testing/strategy.md). Modeled on substrate's
+# Gates for the substrate-kernels build (testing/strategy.md). Modeled on substrate's
 # CI: each gate is its own attributable job. The fast static/apply/config gates run
 # on every PR; the slow lanes (full kernel build, interim QEMU boot, repro-check)
 # run too but are the heavy ones. The Makefile — not this YAML — owns each gate's
@@ -68,7 +68,7 @@ jobs:
     runs-on:
       - nscloud-ubuntu-24.04-${{ matrix.rarch }}-8x16-with-cache;github.run-id=${{ github.run_id }}
       - nscloud-cache-size-50gb
-      - nscloud-cache-tag-substrate-kernel-${{ matrix.rarch }}
+      - nscloud-cache-tag-substrate-kernels-${{ matrix.rarch }}
       - nscloud-container-image-cache
       - namespace-features:container.privileged=true
     steps:
@@ -79,10 +79,10 @@ jobs:
           path: tarballs
           key: kernel-tarball-${{ hashFiles('scripts/kernel-pin.env') }}
       - name: Build the pinned toolchain container
-        run: docker build -t substrate-kernel-build tools/build
+        run: docker build -t substrate-kernels-build tools/build
       - name: configure (olddefconfig + config-invariant), no compile
         run: |
-          docker run --rm -v "$PWD":/work -w /work substrate-kernel-build \
+          docker run --rm -v "$PWD":/work -w /work substrate-kernels-build \
             make configured ARCH=${{ matrix.arch }} VARIANT=${{ matrix.variant }}
 
   # ---- full build → the .kernel bundle ------------------------------------------
@@ -98,7 +98,7 @@ jobs:
     runs-on:
       - nscloud-ubuntu-24.04-${{ matrix.rarch }}-8x16-with-cache;github.run-id=${{ github.run_id }}
       - nscloud-cache-size-50gb
-      - nscloud-cache-tag-substrate-kernel-${{ matrix.rarch }}
+      - nscloud-cache-tag-substrate-kernels-${{ matrix.rarch }}
       - nscloud-container-image-cache
       - namespace-features:container.privileged=true
     steps:
@@ -109,10 +109,10 @@ jobs:
           path: tarballs
           key: kernel-tarball-${{ hashFiles('scripts/kernel-pin.env') }}
       - name: Build the pinned toolchain container
-        run: docker build -t substrate-kernel-build tools/build
+        run: docker build -t substrate-kernels-build tools/build
       - name: Build the bundle (compile + pack) in the pinned container
         run: |
-          docker run --rm -v "$PWD":/work -w /work substrate-kernel-build \
+          docker run --rm -v "$PWD":/work -w /work substrate-kernels-build \
             make all ARCH=${{ matrix.arch }} VARIANT=${{ matrix.variant }}
       - name: Stage the kernel binary for the boot-smoke lane
         run: |
@@ -145,7 +145,7 @@ jobs:
     runs-on:
       - nscloud-ubuntu-24.04-${{ matrix.rarch }}-8x16-with-cache;github.run-id=${{ github.run_id }}
       - nscloud-cache-size-50gb
-      - nscloud-cache-tag-substrate-kernel-${{ matrix.rarch }}
+      - nscloud-cache-tag-substrate-kernels-${{ matrix.rarch }}
     steps:
       - uses: actions/checkout@v6
       - uses: actions/download-artifact@v8
@@ -172,7 +172,7 @@ jobs:
     runs-on:
       - nscloud-ubuntu-24.04-${{ matrix.rarch }}-8x16-with-cache;github.run-id=${{ github.run_id }}
       - nscloud-cache-size-50gb
-      - nscloud-cache-tag-substrate-kernel-${{ matrix.rarch }}
+      - nscloud-cache-tag-substrate-kernels-${{ matrix.rarch }}
       - nscloud-container-image-cache
       - namespace-features:container.privileged=true
     steps:
@@ -183,8 +183,8 @@ jobs:
           path: tarballs
           key: kernel-tarball-${{ hashFiles('scripts/kernel-pin.env') }}
       - name: Build the pinned toolchain container
-        run: docker build -t substrate-kernel-build tools/build
+        run: docker build -t substrate-kernels-build tools/build
       - name: Assert byte-identical rebuild
         run: |
-          docker run --rm -v "$PWD":/work -w /work substrate-kernel-build \
+          docker run --rm -v "$PWD":/work -w /work substrate-kernels-build \
             make repro-check ARCH=${{ matrix.arch }} VARIANT=${{ matrix.variant }}

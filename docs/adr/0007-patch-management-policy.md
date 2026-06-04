@@ -7,7 +7,7 @@
 
 ## Context
 
-substrate-kernel needs source changes the kernel `.config` cannot express: orderly
+substrate-kernels needs source changes the kernel `.config` cannot express: orderly
 shutdown when the guest entrypoint exits, vsock datagram support, TSI, the x86 ACPI
 hypervisor fixes, and others ([design/patches.md](../design/patches.md)). The
 reference accumulated ~36 such patches. We must decide **how** these are

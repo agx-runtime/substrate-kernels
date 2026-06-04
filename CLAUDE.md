@@ -1,6 +1,6 @@
-# Substrate Kernel
+# Substrate Kernels
 
-**substrate-kernel** is the build system that produces the `.kernel` artifact —
+**substrate-kernels** is the build system that produces the `.kernel` artifact —
 the Linux guest kernel that **substrate** (our embedded microVM monitor) loads
 into a guest. It is *not* the hypervisor and *not* a library: it pins a Linux
 source tree, applies a curated patch set, builds it with a minimal monolithic
@@ -38,7 +38,7 @@ and boot path a microVM never touches.
 
 ## 1. Provenance & Build Discipline
 
-substrate-kernel does not fork Linux; it maintains a **minimal, ordered patch
+substrate-kernels does not fork Linux; it maintains a **minimal, ordered patch
 series** and a **curated per-(arch, variant) config** against a pinned upstream
 tree (§4, [ADR 0007](docs/adr/0007-patch-management-policy.md)). Every divergence
 from stock Linux earns its place against §0 and records its provenance.
@@ -54,7 +54,7 @@ The discipline for each piece of the build:
 - **Substrate-native naming everywhere.** File names, the bundle magic, tooling
   names, patch titles, config comments, and prose all use our own names: the
   artifact is a *kernel bundle*, the magic is `SUBK`, the packer is `pack-kernel`,
-  the producer is *substrate-kernel*, the consumer is *substrate*. No foreign
+  the producer is *substrate-kernels*, the consumer is *substrate*. No foreign
   project's names leak into the tree.
 - **One patch, one purpose, applied clean.** Each patch has a single stateable
   change, a why-header (intent + provenance + citation), and applies at `-p1` with
@@ -105,7 +105,7 @@ maintenance debt and a rebase hazard). Patches we carry, patches we drop, and th
 
 ## 2. The Artifact Contract
 
-substrate-kernel produces exactly one kind of artifact: a **kernel bundle**, a
+substrate-kernels produces exactly one kind of artifact: a **kernel bundle**, a
 flat binary file substrate consumes with no kernel-image parser of its own. That
 dictates the shape:
 

@@ -13,7 +13,7 @@ the constitution must have the *whole* design in context — not be left to disc
 and open docs on demand, which silently drops the ones it doesn't think to read.
 substrate solves this with a flat `@`-import manifest in its CLAUDE.md (substrate
 ADR 0011), guarded by a script that fails the build if the manifest is not exactly
-every doc. substrate-kernel adopts the same mechanism for the same reason.
+every doc. substrate-kernels adopts the same mechanism for the same reason.
 
 The Claude Code `@`-import has two relevant properties: imports resolve only to a
 bounded depth, and an `@`-path inside a code span or fence is ignored. A naive

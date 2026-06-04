@@ -1,6 +1,6 @@
 /**
- * substrate-kernel download proxy. A thin Cloudflare Worker bound at
- * `kernels.substrate.loopholelabs.io` and `kernels.agx.so` that serves
+ * substrate-kernels download proxy. A thin Cloudflare Worker bound at
+ * `kernels.substrate.so` and `kernels.agx.so` that serves
  * `.kernel` bundles + SHA256SUMS from R2 and emits one `kernel_download`
  * event per successful full download into the analytics events queue. The
  * `/` listing page also loads the RudderStack SDK (docs/adr/0012) so page
@@ -13,7 +13,7 @@
  * The analytics event conforms to the queue contract at
  * https://github.com/loopholelabs/analytics/blob/main/docs/spec/queue-protocol.md.
  * The producer is implemented locally in `./analytics.ts` per analytics
- * ADR 0015's first-class hand-roll path — substrate-kernel takes no
+ * ADR 0015's first-class hand-roll path — substrate-kernels takes no
  * cross-repo dependency on the analytics monorepo.
  *
  * docs/design/download-proxy.md is authoritative.
@@ -139,13 +139,13 @@ function listingEtag(listing: Listing, hostname: string): string {
  */
 function resolveAnalytics(env: Env, hostname: string): AnalyticsConfig | null {
   const dataPlaneUrl = env.ANALYTICS_DATA_PLANE_URL;
-  const mapJson = env.ANALYTICS_WRITE_KEYS;
+  const mapJson = env.AGX_ANALYTICS_KEYS;
   if (!dataPlaneUrl || !mapJson) return null;
   let map: unknown;
   try {
     map = JSON.parse(mapJson);
   } catch {
-    console.error('download-proxy: ANALYTICS_WRITE_KEYS is not valid JSON');
+    console.error('download-proxy: AGX_ANALYTICS_KEYS is not valid JSON');
     return null;
   }
   if (typeof map !== 'object' || map === null) return null;
