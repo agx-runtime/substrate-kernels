@@ -46,9 +46,13 @@ secret-retrieval initrd from source is out of scope; we vendor known-good blobs.
 
 4. **TEE wiring is deferred.** The `patches-tee/` series and the `config-sev_x86_64`
    / `config-tdx_x86_64` cells are carried and gated (apply-clean + config-invariant)
-   now, but the firmware/initrd blobs are **not yet vendored**, so sev/tdx bundles
-   are not yet buildable. Settling blob-vendoring (which prebuilt blobs, their
-   provenance + pins) is a follow-up; base ships first.
+   now — the configs are derived from `config-base_x86_64` against the pinned tree
+   ([design/kernel-config.md](../design/kernel-config.md) records the TEE delta) and
+   the sev/tdx kernels compile against the pin — but the firmware/initrd blobs are
+   **not yet vendored**, so a bundle produced today would lack the qboot/initrd
+   sections confidential boot requires; sev/tdx bundles do not ship. Settling
+   blob-vendoring (which prebuilt blobs, their provenance + pins) is a follow-up;
+   base ships first.
 
 5. **The bundle marks the variant explicitly.** The header's `variant` field
    (`1`=sev, `2`=tdx) tells substrate (and any attestation tooling) precisely what it
