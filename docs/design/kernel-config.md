@@ -108,11 +108,26 @@ throughout ([ADR 0008](../adr/0008-kernel-capability-surface-vs-vmm-scope.md)).
   (`CONFIG_PVH=y` is carried as a kernel capability, but the boot path is the 64-bit
   `boot_params` entry, not PVH — [ADR 0004](../adr/0004-boot-contract-with-substrate.md));
   the aarch64 timer/GIC options. TSO/memory-model options are aarch64-only
-  ([patches.md](patches.md)).
-- **base vs sev/tdx/windows (x86 only):** the TEE cells add the confidential-compute
-  options (memory-encryption, restricted-DMA, the secret-retrieval path) and base
-  cells **forbid** them ([ADR 0009](../adr/0009-confidential-compute-variants.md));
-  the windows cell adds Hyper-V enlightenments (`CONFIG_HYPERV*`) and is packed at
+  ([patches.md](patches.md)). riscv64 (carried, not a substrate boot target —
+  [ADR 0002](../adr/0002-target-architectures.md)) carries the common
+  monolithic/virtio core but not the `FUSE_DAX` / `VIRTIO_RTC` extras; the
+  config-invariant gate asserts only the common set for riscv64.
+- **base vs sev/tdx/windows (x86 only):** the TEE cells are derived from
+  `config-base_x86_64` against the pinned tree with `patches-tee/` applied, plus
+  the TEE delta; base cells **forbid** the TEE symbols
+  ([ADR 0009](../adr/0009-confidential-compute-variants.md)). The sev delta:
+  `CONFIG_EFI` + `CONFIG_EFI_STUB` (a hard Kconfig dependency of
+  `AMD_MEM_ENCRYPT`), `CONFIG_AMD_MEM_ENCRYPT`, `CONFIG_SEV_GUEST` (the SNP
+  attestation driver), `CONFIG_CMDLINE_SECRET` (the patches-tee secret-retrieval
+  path). The tdx delta: `CONFIG_EFI` + `CONFIG_EFI_STUB` + `CONFIG_X86_X2APIC`
+  (hard Kconfig dependencies of `INTEL_TDX_GUEST`), `CONFIG_INTEL_TDX_GUEST`,
+  `CONFIG_TDX_GUEST_DRIVER` (the TDREPORT attestation driver),
+  `CONFIG_CMDLINE_SECRET`. `CMDLINE_SECRET` requires a **measured built-in
+  command line** (`CONFIG_CMDLINE_BOOL` + `CONFIG_CMDLINE_OVERRIDE`) — in a
+  confidential guest the command line is part of the measured launch state, so
+  the host must not control it; the baked line is a minimal guest-model
+  placeholder (`console=hvc0 reboot=k panic=-1`) finalized when TEE wiring lands.
+  The windows cell adds Hyper-V enlightenments (`CONFIG_HYPERV*`) and is packed at
   4 KiB ([ADR 0002](../adr/0002-target-architectures.md)).
 - **base vs debug** (x86_64, aarch64 — [ADR 0013](../adr/0013-debug-variant.md)):
   the debug cell adds tracing (`CONFIG_FTRACE`, `CONFIG_FUNCTION_TRACER`,

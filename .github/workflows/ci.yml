@@ -56,6 +56,9 @@ jobs:
         run: make applies-clean VARIANT=${{ matrix.variant }} ARCH=x86_64
 
   # ---- config-invariant: olddefconfig + required/forbidden per cell (ADR 0006) --
+  # sev/tdx are carried-not-wired (ADR 0009) but their configs ARE gated here:
+  # olddefconfig + the invariant set must hold against the pin, so a pin bump
+  # cannot silently rot the TEE cells. They are not built or boot-smoked.
   config:
     strategy:
       fail-fast: false
@@ -63,6 +66,8 @@ jobs:
         include:
           - { arch: x86_64, rarch: amd64, variant: base }
           - { arch: x86_64, rarch: amd64, variant: debug }
+          - { arch: x86_64, rarch: amd64, variant: sev }
+          - { arch: x86_64, rarch: amd64, variant: tdx }
           - { arch: aarch64, rarch: arm64, variant: base }
           - { arch: aarch64, rarch: arm64, variant: debug }
     runs-on:
