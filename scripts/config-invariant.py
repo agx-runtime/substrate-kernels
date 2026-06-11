@@ -35,11 +35,16 @@ REQUIRED_COMMON = {
     "CONFIG_BPF": "y",
     "CONFIG_BPF_SYSCALL": "y",
     "CONFIG_CGROUP_BPF": "y",
+    # Guest-side KVM: a substrate guest can host its own VMs when the host
+    # exposes virtualization extensions; inert without them (ADR 0008).
+    "CONFIG_KVM": "y",
 }
 
 # Arch-specific required additions.
 REQUIRED_ARCH = {
-    "x86_64": {"CONFIG_PVH": "y", "CONFIG_FUSE_DAX": "y", "CONFIG_VIRTIO_RTC": "y"},
+    "x86_64": {"CONFIG_PVH": "y", "CONFIG_FUSE_DAX": "y", "CONFIG_VIRTIO_RTC": "y",
+               # both x86 vendor backends for guest-side KVM
+               "CONFIG_KVM_INTEL": "y", "CONFIG_KVM_AMD": "y"},
     "aarch64": {"CONFIG_FUSE_DAX": "y", "CONFIG_VIRTIO_RTC": "y"},
     "riscv64": {},  # carried, not CI-gated; only the common set is asserted
 }

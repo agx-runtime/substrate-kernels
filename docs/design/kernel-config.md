@@ -51,6 +51,15 @@ throughout ([ADR 0008](../adr/0008-kernel-capability-surface-vs-vmm-scope.md)).
   mounted).
 - **CPU:** `HOTPLUG_CPU`; `NR_CPUS` bounded to substrate's max (value cited in the
   config comment).
+- **Guest-side KVM (every variant):** `VIRTUALIZATION` + `KVM` (x86_64 adds both
+  vendor backends, `KVM_INTEL` + `KVM_AMD`; aarch64/riscv64 use the arch-native
+  `KVM`), so a substrate guest can itself host KVM VMs when the host exposes
+  virtualization extensions to the guest (nested virtualization). Inert without
+  that exposure — with no VMX/SVM/EL2 available, KVM's init finds no hardware
+  support and provides no `/dev/kvm`, the same carried-capability principle as an
+  unwired virtio driver ([ADR 0008](../adr/0008-kernel-capability-surface-vs-vmm-scope.md)).
+  Dependent sub-options take the pin's `olddefconfig` defaults (`KVM_SMM`/
+  `KVM_HYPERV` on, `KVM_XEN`/`KVM_WERROR` off, `KVM_MAX_NR_VCPUS=1024` on x86).
 
 **Disabled (microVM-irrelevant or cut):**
 
