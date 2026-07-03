@@ -22,6 +22,7 @@ REQUIRED_COMMON = {
     "CONFIG_VIRTIO_NET": "y",
     "CONFIG_VIRTIO_CONSOLE": "y",
     "CONFIG_VIRTIO_VSOCKETS": "y",
+    "CONFIG_VIRTIO_BALLOON": "y",      # dynamic guest memory reclaim
     "CONFIG_HW_RANDOM_VIRTIO": "y",    # rng
     "CONFIG_VIRTIO_FS": "y",           # optional --volume mounts
     "CONFIG_FUSE_FS": "y",
