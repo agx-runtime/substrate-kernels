@@ -24,6 +24,7 @@ Context → Decision → Consequences → Alternatives considered, with a `Statu
 | [0011](0011-download-proxy-with-analytics.md) | Download proxy with analytics | Accepted | a thin CF Worker (`download-proxy/`) on `kernels.substrate.so` + `kernels.agx.so` that serves the R2 bucket via binding and emits one `kernel_download` event per full download into the analytics pipeline |
 | [0012](0012-listing-page-web-analytics-and-correlation.md) | Listing-page web analytics and download correlation | Accepted | the `/` page loads the RudderStack SDK (`source = WEB:<HOST>`); a same-origin `substrate_aid` cookie + an optional `X-Substrate-Anonymous-Id` header tie the page's download-click to the proxy's server-side `kernel_download` event |
 | [0013](0013-debug-variant.md) | The debug variant | Accepted | a second variant per (x86_64, aarch64) carrying ftrace, kprobes, BPF tracing, DWARF5/BTF debug info, and kgdb on top of `base`, distributed alongside base via CI + release.yml; bundle `variant = 4` |
+| [0014](0014-container-runtime-networking.md) | Container-runtime networking (in-guest Docker) | Accepted | design/kernel-config.md — completes the netfilter/bridge/NAT surface (xt `addrtype`, nft/legacy masquerade+reject, ip6tables, VXLAN/MACVLAN/IPVLAN) so `dockerd` runs in the guest; carried on base/debug (x86_64, aarch64) + riscv64 base, gated by config-invariant |
 
 0001 establishes the convention and fixes the pin that roots reproducibility.
 0002–0004 fix the artifact's shape (architectures, bundle format, boot contract).
@@ -35,4 +36,7 @@ Worker in this repo, sitting between the public download hostnames and the R2
 bucket so every download is observable in the analytics pipeline. 0012 extends that
 Worker's listing page with the RudderStack web SDK and ties the page's
 download-click to the proxy's server-side download event via a same-origin cookie.
+0013 adds the debug variant. 0014 completes the container-runtime networking surface
+(netfilter/bridge/NAT) on the guest-model cells so a substrate guest can run a
+container engine such as `dockerd`, gating the set with config-invariant.
 Further decisions get their own numbered ADR here as they land.

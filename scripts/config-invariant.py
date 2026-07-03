@@ -54,6 +54,39 @@ REQUIRED_ARCH = {
 # windows/sev/tdx are carried/special-purpose and out of scope for XDP.
 XDP_VARIANTS = {"base", "debug"}
 
+# Container-runtime networking (in-guest Docker/dockerd — ADR 0014). The variants
+# that ship as the substrate guest model carry the netfilter/bridge/NAT surface a
+# container engine needs: iptables-nft goes through nft_compat, which requires the
+# built-in xt matches (ADDRTYPE was the symbol whose absence broke dockerd's bridge
+# driver), and container outbound NAT needs the MASQUERADE targets. Scoped like
+# XDP_VARIANTS; sev/tdx/windows are out of scope. olddefconfig can silently drop any
+# of these if a dependency changes across a pin bump, so the gate pins them.
+DOCKER_VARIANTS = {"base", "debug"}
+DOCKER_REQUIRED = {
+    "CONFIG_NETFILTER": "y",
+    "CONFIG_NETFILTER_ADVANCED": "y",
+    "CONFIG_NF_CONNTRACK": "y",
+    "CONFIG_NF_NAT": "y",
+    "CONFIG_NF_NAT_MASQUERADE": "y",   # container outbound NAT (auto-selected)
+    "CONFIG_NF_TABLES": "y",
+    "CONFIG_NFT_COMPAT": "y",          # iptables-nft translates xt matches via this
+    "CONFIG_NFT_MASQ": "y",
+    "CONFIG_NETFILTER_XT_MATCH_ADDRTYPE": "y",   # the symbol that broke dockerd
+    "CONFIG_NETFILTER_XT_MATCH_CONNTRACK": "y",
+    "CONFIG_NETFILTER_XT_TARGET_MASQUERADE": "y",
+    "CONFIG_IP_NF_IPTABLES": "y",
+    "CONFIG_IP_NF_NAT": "y",
+    "CONFIG_IP_NF_TARGET_MASQUERADE": "y",
+    "CONFIG_IP6_NF_IPTABLES": "y",     # docker configures ip6tables by default
+    "CONFIG_IP6_NF_NAT": "y",
+    "CONFIG_BRIDGE": "y",              # the default docker0 bridge network
+    "CONFIG_BRIDGE_NETFILTER": "y",
+    "CONFIG_VETH": "y",               # container ↔ bridge veth pairs
+    "CONFIG_VXLAN": "y",              # overlay networks
+    "CONFIG_MACVLAN": "y",           # macvlan driver
+    "CONFIG_IPVLAN": "y",            # ipvlan driver
+}
+
 # Forbidden anywhere: monolithic image (no modules), cut driver classes,
 # microVM-irrelevant subsystems (kernel-config.md).
 FORBIDDEN_COMMON = {
@@ -116,6 +149,10 @@ def main():
     # XDP_SOCKETS required for variants that ship as the substrate guest model.
     if args.variant in XDP_VARIANTS:
         required["CONFIG_XDP_SOCKETS"] = "y"
+
+    # Container-runtime networking required for the guest-model variants (ADR 0014).
+    if args.variant in DOCKER_VARIANTS:
+        required.update(DOCKER_REQUIRED)
 
     # Debug variant carries the tracing/debugging surface; require the master
     # tracing toggle + the specific tracers + kprobes + bpf_events explicitly so the

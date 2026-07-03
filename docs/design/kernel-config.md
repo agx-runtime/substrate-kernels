@@ -28,6 +28,7 @@ throughout ([ADR 0008](../adr/0008-kernel-capability-surface-vs-vmm-scope.md)).
 | **DRM/framebuffer pulls in a large subsystem** | GPU configs enabled | **disabled** — GPU is cut (CLAUDE.md §1) | config-invariant gate (forbidden set) |
 | **Reproducibility-hostile config** — embedded build IDs/timestamps | (relies on `KBUILD_BUILD_*`) | also disable embedded IDs/timestamps in config where possible ([ADR 0005](../adr/0005-build-environment-and-reproducibility.md)) | `make repro-check` |
 | **TEE config must not leak into base** | separate `-sev`/`-tdx` configs | base configs carry **no** TEE options; sev/tdx are separate cells ([ADR 0009](../adr/0009-confidential-compute-variants.md)) | config-invariant (base forbids TEE) |
+| **Container-runtime netfilter must survive `olddefconfig`** — a container engine programs a broad netfilter/bridge set; a dropped `xt_addrtype` or masquerade target makes dockerd fail to register its bridge driver | (ungated) | assert the Docker-required netfilter/bridge/NAT set on `base`/`debug`; note `BRIDGE_VLAN_FILTERING` *depends on* `VLAN_8021Q` and `IP6_NF_TARGET_MASQUERADE` *depends on* `IP6_NF_NAT` (enable each dep in the same pass) ([ADR 0014](../adr/0014-container-runtime-networking.md)) | config-invariant gate |
 
 ## Our design
 
@@ -123,6 +124,10 @@ throughout ([ADR 0008](../adr/0008-kernel-capability-surface-vs-vmm-scope.md)).
   `CONFIG_BPF_JIT_ALWAYS_ON`), and source-level debug
   (`CONFIG_DEBUG_INFO_DWARF5`, `CONFIG_DEBUG_INFO_BTF`, `CONFIG_GDB_SCRIPTS`).
   The cuts above (Btrfs, SOUND, FAT/NLS, CMA on aarch64) stay cut in debug.
+- **guest-model cells vs sev/tdx/windows:** the container-runtime networking surface
+  (netfilter/bridge/NAT — see below) is carried on `base`/`debug` (x86_64, aarch64) and
+  `base` (riscv64), and is **absent** on the sev/tdx/windows variants
+  ([ADR 0014](../adr/0014-container-runtime-networking.md)).
 
 **eBPF + XDP guarantees** (every variant; the gate enforces them):
 
@@ -142,6 +147,37 @@ helper), `CONFIG_BPF_STREAM_PARSER=y` (BPF sockmap stream parser),
 `kernel.unprivileged_bpf_disabled=1`). These match Firecracker's guest-kernel
 posture. `CONFIG_BPFILTER` was removed from upstream Linux before our 6.12
 pin so it is no longer a valid symbol.
+
+**Container-runtime networking (netfilter / bridge / NAT)** — carried on the
+guest-model cells (`base`/`debug` on x86_64 & aarch64, plus `base` on riscv64), so a
+substrate guest can run a container engine (`dockerd`/`containerd`) with its default
+bridge network ([ADR 0014](../adr/0014-container-runtime-networking.md)). The
+config-invariant gate enforces the core set on these cells; sev/tdx/windows do **not**
+carry it.
+
+- **The `xt` matches an engine's rules need.** Modern container images run
+  `iptables-nft`, which routes classic matches through `nft_compat` — that in turn
+  needs the built-in `xt` modules: `CONFIG_NETFILTER_XT_MATCH_ADDRTYPE` (whose absence
+  was the concrete failure — dockerd's bridge driver reporting *"addrtype revision 0
+  not supported"*), plus `_STATE`, `_MARK`, `_MULTIPORT`.
+- **Bridge + NAT (both backends).** `CONFIG_BRIDGE` (+`BRIDGE_NETFILTER`) and
+  `CONFIG_VETH` for the container ↔ bridge topology, and both the nft and legacy
+  masquerade/reject paths — `CONFIG_NFT_MASQ`/`NFT_REJECT`,
+  `CONFIG_NETFILTER_XT_TARGET_MASQUERADE`, `CONFIG_IP_NF_TARGET_MASQUERADE`/`_REJECT`
+  (auto-pulling `NF_NAT_MASQUERADE`) — so container outbound traffic is SNAT'd. IPv6 is
+  symmetric (`CONFIG_IP6_NF_IPTABLES` + `IP6_NF_FILTER`/`MANGLE`/`NAT`/
+  `TARGET_MASQUERADE`/`TARGET_REJECT`); Docker configures ip6tables by default.
+- **Network drivers.** `CONFIG_VXLAN` (overlay networks), `CONFIG_MACVLAN`,
+  `CONFIG_IPVLAN`, `CONFIG_BRIDGE_VLAN_FILTERING`, plus the nft bridge/ebtables path
+  (`CONFIG_NF_TABLES_BRIDGE`, `CONFIG_NF_TABLES_NETDEV`, `CONFIG_BRIDGE_NF_EBTABLES`).
+- **Dependency notes** (each would be silently dropped by `olddefconfig` otherwise):
+  `BRIDGE_VLAN_FILTERING` *depends on* `CONFIG_VLAN_8021Q`, and
+  `IP6_NF_TARGET_MASQUERADE` *depends on* `IP6_NF_NAT` — both enabled in the same pass.
+- **Scope held.** These are carried capabilities, inert without host wiring
+  ([ADR 0008](../adr/0008-kernel-capability-surface-vs-vmm-scope.md)). `CONFIG_IP_VS`
+  (Swarm/IPVS service load-balancing) and `CONFIG_IP_SET` stay **off** — no substrate
+  consumer; the Docker-optional tc controllers (`NET_SCHED`/`NET_CLS_CGROUP`/
+  `CGROUP_NET_PRIO`) likewise stay off.
 
 The authoritative enabled/forbidden sets per cell live as the config-invariant
 gate's data ([testing/strategy.md](../testing/strategy.md)); this doc is the prose
