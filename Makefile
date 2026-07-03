@@ -13,7 +13,7 @@
 
 # ---- pin (ADR 0001) --------------------------------------------------------
 include scripts/kernel-pin.env
-export KERNEL_VERSION KERNEL_SHA256 KERNEL_URL
+export KERNEL_VERSION KERNEL_SHA256 KERNEL_URL KERNEL_URL_FALLBACK
 
 # ---- fixed build metadata (ADR 0005) ---------------------------------------
 # Fixed constants so nothing wall-clock- or host-dependent leaks into the image.
@@ -128,9 +128,16 @@ image:
 	docker build -t $(IMAGE) tools/build
 
 # ---- ① pin → tarball: fetch + verify sha256 BEFORE extraction (ADR 0001) ---
+# Try the pinned primary (kernel.org); on any failure (e.g. a CDN outage) fall back
+# to our own byte-identical mirror. The sha256 check runs on whichever source served
+# the file, so the fetch source is never part of the trust root — a wrong or
+# tampered mirror fails the same hash check and refuses to extract.
 $(TARBALL):
 	@mkdir -p tarballs
-	curl -fL "$(KERNEL_URL)" -o "$(TARBALL).tmp"
+	@curl -fL "$(KERNEL_URL)" -o "$(TARBALL).tmp" \
+		|| { echo "primary source failed ($(KERNEL_URL)); trying fallback $(KERNEL_URL_FALLBACK)"; \
+		     curl -fL "$(KERNEL_URL_FALLBACK)" -o "$(TARBALL).tmp"; } \
+		|| { echo "FATAL: both primary and fallback fetch failed for $(TARBALL)"; rm -f "$(TARBALL).tmp"; exit 1; }
 	@echo "$(KERNEL_SHA256)  $(TARBALL).tmp" | sha256sum -c - \
 		|| { echo "FATAL: sha256 mismatch for $(TARBALL) — refusing to extract"; rm -f "$(TARBALL).tmp"; exit 1; }
 	@mv "$(TARBALL).tmp" "$(TARBALL)"
