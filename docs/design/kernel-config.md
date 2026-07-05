@@ -38,7 +38,8 @@ throughout ([ADR 0008](../adr/0008-kernel-capability-surface-vs-vmm-scope.md)).
   `mmio` crate drives).
 - **Devices substrate wires:** `VIRTIO_BLK`, `VIRTIO_NET`, `VIRTIO_VSOCKETS`,
   `VIRTIO_CONSOLE`, `HW_RANDOM_VIRTIO` (rng), `VIRTIO_BALLOON` (dynamic guest memory
-  reclaim / overcommit, selecting `MEMORY_BALLOON`). TSI is enabled via its patch's
+  reclaim / overcommit, selecting `MEMORY_BALLOON`; paired with `PAGE_REPORTING` so
+  the guest reports free pages back to the host). TSI is enabled via its patch's
   config symbol ([patches.md](patches.md)).
 - **Optional substrate capabilities:** `FUSE_FS` + `VIRTIO_FS` + `FUSE_DAX` (for
   `--volume` mounts, never rootfs — substrate architecture.md §1), `VIRTIO_RTC`
