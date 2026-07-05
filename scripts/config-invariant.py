@@ -31,7 +31,6 @@ REQUIRED_COMMON = {
     "CONFIG_EXT4_FS": "y",             # the production rootfs is a sparse ext4 disk
     "CONFIG_TMPFS": "y",
     "CONFIG_DEVTMPFS": "y",
-    "CONFIG_TSI": "y",                 # substrate's net contract (transparent sockets)
     "CONFIG_BLK_DEV_INITRD": "y",      # initrd path available in every variant
     # eBPF: must work in every guest (XDP, cgroup/TC programs, BPF syscall).
     "CONFIG_BPF": "y",
