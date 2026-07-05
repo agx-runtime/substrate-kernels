@@ -23,8 +23,9 @@ kernel-image parser of its own:
    **not** parse ELF/bzImage/Image at runtime ([ADR 0004](adr/0004-boot-contract-with-substrate.md)).
 3. **Fixed feature set per variant.** The header carries no capability
    advertisement; the kernel carries a fixed per-variant
-   driver set (TSI, vsock-datagram, virtio-fs/DAX, virtio-rtc, …) and substrate
-   wires what it instantiates ([ADR 0008](adr/0008-kernel-capability-surface-vs-vmm-scope.md)).
+   driver set (vsock-datagram, virtio-fs/DAX, virtio-rtc, …) and substrate
+   wires what it instantiates ([ADR 0008](adr/0008-kernel-capability-surface-vs-vmm-scope.md);
+   kernel-side TSI was carried but dropped — [ADR 0015](adr/0015-drop-tsi-and-x86-acpi-legacy-pic.md)).
 4. **Boots fast to the substrate guest model.** Monolithic, virtio-only, no module
    loading; reaches userspace quickly; reboots cleanly when the guest entrypoint
    (PID 1) exits rather than panicking ([design/patches.md](design/patches.md)).
@@ -122,7 +123,7 @@ substrate boot targets ([ADR 0002](adr/0002-target-architectures.md)).
 ## 5. Capability surface vs substrate's device scope
 
 The kernel carries the drivers for substrate's full feature contract — virtio
-block, net (incl. TSI), vsock (incl. datagrams), console, rng, and virtio-fs/DAX
+block, net, vsock (incl. datagrams), console, rng, and virtio-fs/DAX
 for optional `--volume` mounts — plus a few that substrate may not instantiate in
 every configuration (e.g. virtio-rtc). A driver with no host-side device is inert;
 the guest→host security boundary is enforced by **substrate not creating the
@@ -166,9 +167,9 @@ next. Steps are named by deliverable, never numbered in source or other docs.
 3. **The minimal base config** — the curated monolithic, virtio-only `.config` per
    architecture, with the config-invariant gate. First image that is *ours*.
 4. **The core patch series** — orderly init-death shutdown plus any boot-protocol
-   patches the base config needs (x86 ACPI hypervisor fixes). First guest that
+   patches the base config needs (the x86 ACPI PCI_CONFIG fix). First guest that
    boots under substrate (boot-smoke lands here, with substrate's KVM backend).
-5. **The device-enabling patches** — vsock datagrams, TSI, virtio-fs/DAX,
+5. **The device-enabling patches** — vsock datagrams, virtio-fs/DAX,
    virtio-rtc, and the supporting fixes, each justified in
    [design/patches.md](design/patches.md), each part of the fixed feature set,
    each exercised by boot-smoke as substrate wires the matching device.

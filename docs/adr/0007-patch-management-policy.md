@@ -8,8 +8,10 @@
 ## Context
 
 substrate-kernels needs source changes the kernel `.config` cannot express: orderly
-shutdown when the guest entrypoint exits, vsock datagram support, TSI, the x86 ACPI
-hypervisor fixes, and others ([design/patches.md](../design/patches.md)). The
+shutdown when the guest entrypoint exits, vsock datagram support, the x86 ACPI
+PCI_CONFIG fix, and others ([design/patches.md](../design/patches.md)). (TSI and the
+x86 `legacy_pic` fix were once carried but were dropped —
+[ADR 0015](0015-drop-tsi-and-x86-acpi-legacy-pic.md).) The
 reference accumulated ~36 such patches. We must decide **how** these are
 managed — because a patch series is simultaneously the highest-leverage and
 highest-risk surface in the repo (CLAUDE.md §6): a bad patch is a guest that

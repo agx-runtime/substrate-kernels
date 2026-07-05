@@ -19,8 +19,9 @@ virtio devices. It is the boundary-tier complement to the input/artifact gates
   rootfs ([initramfs.md](../design/initramfs.md)), and reaches userspace.
 - **The patches work** ([patches.md](../design/patches.md)): orderly init-death
   (the guest entrypoint exiting yields a clean VM shutdown, not a panic); the x86
-  ACPI fixes (x86 boots with PCI off); and each wired capability (vsock, TSI,
-  virtio-fs, rng, console, rtc) functions as substrate exercises it.
+  ACPI PCI_CONFIG fix (x86 boots with PCI off); and each wired capability (vsock,
+  virtio-fs, rng, console, rtc) functions as substrate exercises it. (Kernel-side TSI
+  and the x86 `legacy_pic` fix were dropped — [ADR 0015](../adr/0015-drop-tsi-and-x86-acpi-legacy-pic.md).)
 
 ## Shape
 

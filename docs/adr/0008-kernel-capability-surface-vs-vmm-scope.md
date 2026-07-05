@@ -6,6 +6,12 @@
   surface); CLAUDE.md §1 (scope IN/OUT); [ADR 0009](0009-confidential-compute-variants.md)
   (the TEE variants)
 
+> **Amended by [ADR 0015](0015-drop-tsi-and-x86-acpi-legacy-pic.md):** the kernel-side
+> TSI driver has since been **dropped** from the carried set (a downstream-maintenance
+> trim). The TSI references below are the historical record — TSI is no longer carried
+> or required by substrate's contract. The capability-vs-scope *principle* this ADR
+> establishes is unchanged; only TSI's membership in the carried set is.
+
 ## Context
 
 A guest kernel ships *drivers*; a VMM *instantiates devices*. These are different

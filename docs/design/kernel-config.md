@@ -39,8 +39,9 @@ throughout ([ADR 0008](../adr/0008-kernel-capability-surface-vs-vmm-scope.md)).
 - **Devices substrate wires:** `VIRTIO_BLK`, `VIRTIO_NET`, `VIRTIO_VSOCKETS`,
   `VIRTIO_CONSOLE`, `HW_RANDOM_VIRTIO` (rng), `VIRTIO_BALLOON` (dynamic guest memory
   reclaim / overcommit, selecting `MEMORY_BALLOON`; paired with `PAGE_REPORTING` so
-  the guest reports free pages back to the host). TSI is enabled via its patch's
-  config symbol ([patches.md](patches.md)).
+  the guest reports free pages back to the host). (Kernel-side `TSI` was carried via
+  its patch's config symbol but has since been dropped —
+  [ADR 0015](../adr/0015-drop-tsi-and-x86-acpi-legacy-pic.md).)
 - **Optional substrate capabilities:** `FUSE_FS` + `VIRTIO_FS` + `FUSE_DAX` (for
   `--volume` mounts, never rootfs — substrate architecture.md §1), `VIRTIO_RTC`
   (timekeeping). These are part of the kernel's fixed feature set; there is no

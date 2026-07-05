@@ -28,8 +28,9 @@ how config relates to the patch series (CLAUDE.md §1: prefer config over patch)
    surface we don't want. Every needed driver is built in (`=y`).
 
 3. **Virtio-only device model.** The enabled device drivers are exactly substrate's
-   set: virtio block, net, vsock, console, rng, plus TSI (substrate's net contract)
-   and virtio-fs/DAX (substrate's optional `--volume` mounts), plus virtio-rtc.
+   set: virtio block, net, vsock, console, rng, and virtio-fs/DAX (substrate's
+   optional `--volume` mounts), plus virtio-rtc. (Kernel-side TSI was in this set but
+   has since been dropped — [ADR 0015](0015-drop-tsi-and-x86-acpi-legacy-pic.md).)
    Non-virtio device classes a microVM never sees — USB, sound, most of PCI, framebuffer/DRM —
    are disabled. (GPU/DRM is cut outright, CLAUDE.md §1.)
 

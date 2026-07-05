@@ -66,10 +66,10 @@ The discipline for each piece of the build:
 - **A fast-booting, monolithic, virtio-only kernel** for the substrate guest.
 - **Architectures: x86_64 and aarch64** ([ADR 0002](docs/adr/0002-target-architectures.md)).
 - **The device drivers substrate's feature contract needs** — virtio block, net,
-  vsock (incl. datagrams), console, rng, plus TSI (transparent socket
-  interception, in substrate's net contract) and virtio-fs/DAX (substrate's
-  optional `--volume` mounts) — a fixed per-variant feature set
-  ([ADR 0008](docs/adr/0008-kernel-capability-surface-vs-vmm-scope.md)).
+  vsock (incl. datagrams), console, rng, and virtio-fs/DAX (substrate's optional
+  `--volume` mounts) — a fixed per-variant feature set
+  ([ADR 0008](docs/adr/0008-kernel-capability-surface-vs-vmm-scope.md)). (Kernel-side
+  TSI was carried but has since been dropped — [ADR 0015](docs/adr/0015-drop-tsi-and-x86-acpi-legacy-pic.md).)
 - **Orderly shutdown when the guest entrypoint (PID 1) exits** — a microVM reboots
   cleanly, it does not panic ([design/patches.md](docs/design/patches.md)).
 - **The pre-flattened kernel bundle** substrate mmaps and enters directly
@@ -385,6 +385,7 @@ a code span or code fence is ignored, which would silently drop the file.
 @docs/adr/0012-listing-page-web-analytics-and-correlation.md
 @docs/adr/0013-debug-variant.md
 @docs/adr/0014-container-runtime-networking.md
+@docs/adr/0015-drop-tsi-and-x86-acpi-legacy-pic.md
 @docs/adr/README.md
 
 ### Component design notes (docs/design/)

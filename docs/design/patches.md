@@ -16,11 +16,12 @@ with the *why* for each, and records the explicit keep/drop decisions.
 ## Background
 
 The carried series, by theme: orderly
-init-death; the vsock datagram series + its nonlinear-SKB reverts; TSI
-(transparent socket interception); the arm64 memory-model/TSO series; virtio-GPU
-(cut); input-compat; DAX/FUSE/overlayfs; virtio-CAN (flagged); virtio-RTC; the x86
-ACPI hypervisor fixes; and the SEV/TDX series (quarantined,
-[ADR 0009](../adr/0009-confidential-compute-variants.md)).
+init-death; the vsock datagram series + its nonlinear-SKB reverts; the arm64
+memory-model/TSO series; virtio-GPU (cut); input-compat; DAX/FUSE/overlayfs;
+virtio-CAN (flagged); virtio-RTC; the x86 ACPI PCI_CONFIG fix; and the SEV/TDX
+series (quarantined, [ADR 0009](../adr/0009-confidential-compute-variants.md)).
+TSI and the x86 ACPI `legacy_pic` fix were **dropped** to trim the downstream
+maintenance surface ([ADR 0015](../adr/0015-drop-tsi-and-x86-acpi-legacy-pic.md)).
 
 ## Carried themes
 
@@ -59,16 +60,15 @@ ACPI hypervisor fixes; and the SEV/TDX series (quarantined,
   lives in functions orthogonal to the revert targets (`fill_skb`/`alloc_skb` TX,
   `vhost_vsock_alloc_skb` RX, the seqpacket/credit logic).
 
-### TSI (transparent socket interception)
-- **What:** address families that route guest `AF_INET`/`AF_INET6`/`AF_UNIX`
-  sockets transparently over vsock to a host proxy, plus the opt-in hijack path.
-  New `net/tsi/` source + a `CONFIG_TSI` symbol.
-- **Why (contract):** substrate's net feature contract explicitly includes "TSI …
-  coexisting with virtio-net, and a per-connect JSON egress policy" (substrate
-  architecture.md §1.3). The kernel-side driver is required for that feature.
-- **Provenance:** original (downstream); the largest single source addition, so
-  re-derived carefully with a substrate-native name and
-  written for review.
+### TSI (transparent socket interception) — dropped
+- Previously two patches — a `net/tsi/` address-family driver plus a `CONFIG_TSI`
+  symbol, and the opt-in socket-hijack path — that routed guest
+  `AF_INET`/`AF_INET6`/`AF_UNIX` sockets transparently over vsock to a host proxy.
+- **Dropped** ([ADR 0015](../adr/0015-drop-tsi-and-x86-acpi-legacy-pic.md)): it was
+  the largest single downstream source addition (touching `net/socket.c`,
+  `security/selinux/`), a standing per-pin-bump maintenance + source-audit cost.
+  `CONFIG_TSI` is removed from every config and from the config-invariant gate.
+  Re-add via a new ADR if a substrate consumer reappears.
 
 ### arm64 memory model / TSO control
 - **What:** `prctl(PR_{SET,GET}_MEM_MODEL)` with a TSO mode, the `ACTLR_EL1`
@@ -103,16 +103,18 @@ ACPI hypervisor fixes; and the SEV/TDX series (quarantined,
   `drivers/virtio/virtio_rtc_*`. Spec: the virtio-rtc device spec + PTP.
 - **Provenance:** backport (the upstream virtio-rtc series).
 
-### x86 ACPI hypervisor fixes
-- **What:** skip the ACPICA PCI_CONFIG address-space handler when `CONFIG_PCI=n`;
-  keep `legacy_pic` populated under HW_REDUCED ACPI.
+### x86 ACPI PCI_CONFIG fix
+- **What:** skip the ACPICA PCI_CONFIG address-space handler when `CONFIG_PCI=n`.
 - **Why (contract):** the minimal config disables PCI
   ([kernel-config.md](kernel-config.md)), but x86 ACPI init assumes a PCI_CONFIG
-  handler and a `legacy_pic`; without these fixes ACPI init fails or null-derefs on
-  the 64-bit direct-boot x86 path ([ADR 0004](../adr/0004-boot-contract-with-substrate.md)).
-  Touches `drivers/acpi/acpica/evhandler.c`, `arch/x86/kernel/acpi/boot.c`. Spec:
-  ACPI (HW_REDUCED) + the x86 boot path.
-- **Provenance:** original (downstream hypervisor-boot fixes); x86-only.
+  handler; without this fix ACPI init fails on the 64-bit direct-boot x86 path
+  ([ADR 0004](../adr/0004-boot-contract-with-substrate.md)). Touches
+  `drivers/acpi/acpica/evhandler.c`. Spec: ACPI + the x86 boot path.
+- **Provenance:** original (downstream hypervisor-boot fix); x86-only.
+- **Note:** the companion `legacy_pic`-under-HW_REDUCED patch (`0101`) was
+  **dropped** ([ADR 0015](../adr/0015-drop-tsi-and-x86-acpi-legacy-pic.md)), which
+  leaves a latent x86-boot risk on substrate's HW_REDUCED ACPI path — not caught by
+  the interim QEMU boot-smoke ([boot-smoke.md](../testing/boot-smoke.md)).
 
 ### General syscall / mm fixes
 - **What:** allow 64-bit processes to use compat input syscalls; fix the
@@ -145,11 +147,12 @@ ACPI hypervisor fixes; and the SEV/TDX series (quarantined,
 |---|---|---|
 | Orderly init-death | **keep** | core microVM behavior (substrate guest entrypoint = PID 1) |
 | vsock datagrams + SKB reverts | **keep** | broadens substrate's vsock muxer; reverts re-validated against the pin |
-| TSI | **keep** | in substrate's net feature contract (architecture.md §1.3) |
+| TSI | **drop** | largest downstream original patch; trimmed to cut per-pin-bump maintenance ([ADR 0015](../adr/0015-drop-tsi-and-x86-acpi-legacy-pic.md)) |
 | arm64 TSO / memory model | **keep** | x86-emulation guests on Apple Silicon; inert if unused (ADR 0008) |
 | virtio-fs / DAX + overlayfs | **keep** | substrate's optional `--volume` mounts (architecture.md §1) |
 | virtio-rtc | **keep** | guest timekeeping; part of the fixed feature set |
-| x86 ACPI hypervisor fixes | **keep** | required for the 64-bit direct-boot x86 path with PCI off |
+| x86 ACPI PCI_CONFIG fix (0100) | **keep** | required for the 64-bit direct-boot x86 path with PCI off |
+| x86 ACPI `legacy_pic` fix (0101) | **drop** | trimmed; latent HW_REDUCED-boot risk, recorded ([ADR 0015](../adr/0015-drop-tsi-and-x86-acpi-legacy-pic.md)) |
 | general syscall/mm fixes | **keep** (conditional) | guest-correctness; drop any already in the pin |
 | kbuild pahole-no-`-j` | **keep** | required for debug-variant repro-check; drop when upstream adopts the LKML fix |
 | **virtio-GPU / virtgpu** | **drop** | GPU is cut (CLAUDE.md §1; user: "just not GPUs") |
@@ -179,6 +182,6 @@ The applies-clean gate (zero fuzz against the pin); the config-invariant gate
 (each patch's `CONFIG_*` present); boot-smoke
 ([testing/boot-smoke.md](../testing/boot-smoke.md)) exercises each kept capability
 as substrate wires the matching device (orderly-shutdown observed as a clean VM
-exit; vsock/TSI/virtio-fs/rtc as working devices; the x86 ACPI fixes as a
+exit; vsock/virtio-fs/rtc as working devices; the x86 ACPI PCI_CONFIG fix as a
 successful x86 boot). A version bump re-runs the whole series through applies-clean
 and re-validates the conditional keeps ([ADR 0001](../adr/0001-kernel-source-pin-and-update-lifecycle.md)).
