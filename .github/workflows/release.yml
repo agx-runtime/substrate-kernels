@@ -8,7 +8,7 @@ name: Release
 # commit; this workflow only builds + publishes. R2 upload is skipped if the
 # Cloudflare credentials are unset, so the GitHub Release still publishes.
 #
-# Config: secret CLOUDFLARE_API_TOKEN; variables CLOUDFLARE_ACCOUNT_ID + R2_BUCKET.
+# Config: secrets CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID; variable R2_BUCKET.
 
 on:
   push:
@@ -164,34 +164,34 @@ jobs:
         uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           command: r2 object put "${{ vars.R2_BUCKET }}/linux-${{ env.VERSION }}-base-x86_64.kernel" --file=linux-${{ env.VERSION }}-base-x86_64.kernel --remote
       - name: Upload base aarch64 bundle to R2
         if: ${{ env.CF_TOKEN != '' }}
         uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           command: r2 object put "${{ vars.R2_BUCKET }}/linux-${{ env.VERSION }}-base-aarch64.kernel" --file=linux-${{ env.VERSION }}-base-aarch64.kernel --remote
       - name: Upload debug x86_64 bundle to R2
         if: ${{ env.CF_TOKEN != '' }}
         uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           command: r2 object put "${{ vars.R2_BUCKET }}/linux-${{ env.VERSION }}-debug-x86_64.kernel" --file=linux-${{ env.VERSION }}-debug-x86_64.kernel --remote
       - name: Upload debug aarch64 bundle to R2
         if: ${{ env.CF_TOKEN != '' }}
         uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           command: r2 object put "${{ vars.R2_BUCKET }}/linux-${{ env.VERSION }}-debug-aarch64.kernel" --file=linux-${{ env.VERSION }}-debug-aarch64.kernel --remote
       - name: Upload SHA256SUMS to R2
         if: ${{ env.CF_TOKEN != '' }}
         uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           # version-scoped so successive releases don't clobber it at the bucket root
           command: r2 object put "${{ vars.R2_BUCKET }}/linux-${{ env.VERSION }}-SHA256SUMS" --file=SHA256SUMS --remote
