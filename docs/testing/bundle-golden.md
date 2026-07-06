@@ -12,6 +12,13 @@ substrate-kernels' analogue of substrate's `insta` golden tests.
   abi_version/page_size/load/entry/offset/size values), the packed 96-byte header is
   compared to committed golden bytes. A field reorder, a width change, or a magic
   typo changes the bytes and fails the build.
+- **The per-arch raw-Image load/entry addresses.** Fixtures routed through the
+  packer's `pack()` itself (a synthetic arm64 Image with a valid header for
+  aarch64, a raw blob for riscv64) lock the computed addresses in golden bytes —
+  aarch64 = the consumer's DRAM base `0x40000000` + the header's `text_offset`,
+  riscv64 = `0x80000000` ([ADR 0004](../adr/0004-boot-contract-with-substrate.md)).
+  An address drift fails here, at build time, not as a guest that cannot map its
+  kernel section.
 - **`HEADER_SIZE == 96`.** Asserted by the packer at startup
   (`struct.calcsize(...) == HEADER_SIZE`, [bundle-format.md](../design/bundle-format.md))
   *and* pinned by the golden, so the two cannot disagree.

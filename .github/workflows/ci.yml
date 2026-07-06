@@ -130,8 +130,10 @@ jobs:
           if-no-files-found: error
 
   # ---- interim QEMU boot (testing/boot-smoke.md) --------------------------------
-  # Real boot-smoke (under substrate) is pending the cross-repo loader (ADR 0004 §5);
-  # this boots the produced kernel under QEMU and checks for the kernel banner.
+  # Real boot-smoke (under substrate) is the cross-repo lane (ADR 0004 §4); this
+  # boots the produced kernel under QEMU — at both 512 MiB and 2048 MiB — and
+  # checks for the kernel banner. QEMU's own -kernel loader places the Image, so
+  # the bundle's load_addr is locked by bundle-golden, not exercised here.
   boot-smoke:
     needs: build
     strategy:

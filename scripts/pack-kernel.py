@@ -43,9 +43,22 @@ import sys
 PAGE_SIZE_DEFAULT = 65536
 PAGE_SIZE_WINDOWS = 4096
 
-# aarch64 / riscv64 raw Image load+entry base (the guest-physical base the consumer
-# uses — ADR 0004).
-RAW_LOAD_ADDR = 0x80000000
+# Raw-Image load+entry bases (ADR 0004): the kernel is loaded at the start of the
+# consumer's guest RAM, so each base IS that machine model's DRAM base.
+#   aarch64: substrate bases guest DRAM at 1 GiB (devices live below it); loading
+#     anywhere else re-creates the boot floor ADR 0004 records.
+#   riscv64: the QEMU-virt riscv memory map bases DRAM at 2 GiB (carried, not a
+#     substrate boot target — ADR 0002).
+RAW_LOAD_ADDR_AARCH64 = 0x40000000
+RAW_LOAD_ADDR_RISCV64 = 0x80000000
+
+# arm64 Image header (Documentation/arch/arm64/booting.rst): the image is placed at
+# a 2 MiB-aligned base + text_offset, with text_offset read from the header (bytes
+# 8..16, little-endian) — 0 on modern kernels including the pinned 6.12, but read,
+# never assumed. The magic at bytes 56..60 ("ARM\x64") identifies an arm64 Image.
+ARM64_IMAGE_MAGIC = 0x644D5241
+ARM64_IMAGE_HEADER_SIZE = 64
+ARM64_LOAD_ALIGN = 0x200000
 
 MAGIC = b"SUBK"
 FORMAT_VERSION = 1
@@ -129,6 +142,28 @@ def flatten_raw(path, page_size):
     return data
 
 
+def arm64_load_addr(image):
+    """Guest-physical load base for an arm64 Image: the consumer's DRAM base plus
+    the header's text_offset (Documentation/arch/arm64/booting.rst — the image is
+    placed at a 2 MiB-aligned base + text_offset, and entered at its start).
+    Validates the Image magic so packing the wrong file is a hard error, never a
+    silently mis-addressed bundle (CLAUDE.md §5)."""
+    if len(image) < ARM64_IMAGE_HEADER_SIZE:
+        raise ValueError(
+            f"arm64 Image shorter than its {ARM64_IMAGE_HEADER_SIZE}-byte header: "
+            f"{len(image)} bytes")
+    magic = struct.unpack_from("<I", image, 56)[0]
+    if magic != ARM64_IMAGE_MAGIC:
+        raise ValueError(
+            f"arm64 Image magic mismatch at offset 56: {magic:#010x} != "
+            f"{ARM64_IMAGE_MAGIC:#010x} — not an arm64 Image")
+    text_offset = struct.unpack_from("<Q", image, 8)[0]
+    base = RAW_LOAD_ADDR_AARCH64
+    assert base % ARM64_LOAD_ALIGN == 0, (
+        f"aarch64 load base {base:#x} not 2 MiB-aligned (booting.rst)")
+    return base + text_offset
+
+
 def build_bundle(arch, variant, abi_version, page_size, kernel_payload, load_addr,
                  entry_addr, qboot_payload, initrd_payload):
     """Assemble header + page_size-aligned payloads into one bytes object.
@@ -207,9 +242,12 @@ def pack(arch, variant, abi_version, kernel, qboot=None, initrd=None):
 
     if arch == "x86_64":
         load_addr, entry_addr, kernel_payload = flatten_elf(kernel, page_size)
+    elif arch == "aarch64":
+        kernel_payload = flatten_raw(kernel, page_size)
+        load_addr = entry_addr = arm64_load_addr(kernel_payload)
     else:
         kernel_payload = flatten_raw(kernel, page_size)
-        load_addr = entry_addr = RAW_LOAD_ADDR
+        load_addr = entry_addr = RAW_LOAD_ADDR_RISCV64
 
     qboot_payload = flatten_raw(qboot, page_size) if qboot else None
     initrd_payload = flatten_raw(initrd, page_size) if initrd else None

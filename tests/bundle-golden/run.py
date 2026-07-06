@@ -14,6 +14,7 @@ import importlib.util
 import os
 import struct
 import sys
+import tempfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 _spec = importlib.util.spec_from_file_location("pack_kernel", os.path.join(ROOT, "scripts", "pack-kernel.py"))
@@ -31,6 +32,31 @@ _FIXTURES = [
                             kernel_payload=b"\xCD" * 4096, load_addr=0x1000000,
                             entry_addr=0x1000000, qboot_payload=None, initrd_payload=None),
      "5355424b0100000001000000010000000300000000100000000000010000000000000001000000000010000000000000001000000000000000000000000000000000000000000000000000000000000000000000000000006000000000000000"),
+]
+
+
+def _arm64_image(text_offset, payload):
+    """Minimal arm64 Image per Documentation/arch/arm64/booting.rst (text_offset
+    le64 at byte 8, image_size at 16, magic at 56) — the fixed input for the
+    aarch64 golden."""
+    hdr = struct.pack("<II", 0x91005A4D, 0x14000000)
+    hdr += struct.pack("<Q", text_offset)
+    hdr += struct.pack("<Q", 64 + len(payload))
+    hdr += struct.pack("<Q", 0)
+    hdr += struct.pack("<QQQ", 0, 0, 0)
+    hdr += struct.pack("<II", pk.ARM64_IMAGE_MAGIC, 0)
+    return hdr + payload
+
+
+# Goldens routed through pack() itself (not build_bundle), so the per-arch address
+# computation — aarch64 = the consumer's DRAM base 0x40000000 + the Image header's
+# text_offset, riscv64 = 0x80000000 — is locked in bytes (ADR 0004). Fixed synthetic
+# kernel inputs; a drifted load/entry address fails here, not at guest boot.
+_PACK_FIXTURES = [
+    ("base aarch64", "aarch64", _arm64_image(0, b"\x5a" * 1234),
+     "5355424b0100000001000000020000000000000000000100000000400000000000000040000000000000010000000000000001000000000000000000000000000000000000000000000000000000000000000000000000006000000000000000"),
+    ("base riscv64", "riscv64", b"\x5a" * 1234,
+     "5355424b0100000001000000030000000000000000000100000000800000000000000080000000000000010000000000000001000000000000000000000000000000000000000000000000000000000000000000000000006000000000000000"),
 ]
 
 
@@ -64,6 +90,21 @@ def check_golden():
     print(f"[bundle-golden] golden header bytes locked for {len(_FIXTURES)} fixtures")
 
 
+def check_pack_golden():
+    for name, arch, kernel_bytes, golden_hex in _PACK_FIXTURES:
+        with tempfile.NamedTemporaryFile(suffix=".img") as f:
+            f.write(kernel_bytes)
+            f.flush()
+            header = pk.pack(arch=arch, variant="base", abi_version=1,
+                             kernel=f.name)[:96]
+        if header.hex() != golden_hex:
+            fail(f"{name}: header bytes drifted\n  got    {header.hex()}\n  golden {golden_hex}")
+        load_addr, entry_addr = struct.unpack_from("<QQ", header, 24)
+        if load_addr != entry_addr:
+            fail(f"{name}: raw-Image load_addr {load_addr:#x} != entry_addr {entry_addr:#x}")
+    print(f"[bundle-golden] per-arch load/entry addresses locked for {len(_PACK_FIXTURES)} pack() fixtures")
+
+
 def check_invariants():
     # A representative TEE-like bundle with all three sections present.
     page = 65536
@@ -91,8 +132,8 @@ def check_invariants():
         fail(f"bundle length {len(bundle)} != last section end {last_off + last_sz}")
     # Absent base sections must be 0/0.
     base = pk.build_bundle(arch="aarch64", variant="base", abi_version=1, page_size=page,
-                           kernel_payload=b"\x00" * page, load_addr=0x80000000,
-                           entry_addr=0x80000000, qboot_payload=None, initrd_payload=None)
+                           kernel_payload=b"\x00" * page, load_addr=0x40000000,
+                           entry_addr=0x40000000, qboot_payload=None, initrd_payload=None)
     (_, _, qo, qs, io_, is_) = struct.unpack("<QQQQQQ", base[40:88])
     if (qo, qs, io_, is_) != (0, 0, 0, 0):
         fail(f"absent sections not zeroed: {(qo, qs, io_, is_)}")
@@ -102,6 +143,7 @@ def check_invariants():
 def main():
     check_header_struct()
     check_golden()
+    check_pack_golden()
     check_invariants()
     print("[bundle-golden] PASS")
 

@@ -15,8 +15,9 @@ The packer: its flat 96-byte header (`struct`
 offset/size section pairs `kernel`/`qboot`/`initrd`, `header_size`), its ELF
 flattening (`PT_LOAD` segments concatenated with inter-segment gap padding,
 `load_addr` from the first segment's `p_vaddr & 0xFFFFFFF`, `entry_addr` from the
-ELF `e_entry`), its raw-`Image` path (read + page-pad, `load_addr` = `entry_addr` =
-`0x80000000`), its 64 KiB section alignment, and its build-time layout assertion
+ELF `e_entry`), its raw-`Image` path (read + page-pad; `load_addr` = `entry_addr` =
+the consumer's DRAM base — aarch64 `0x40000000` + the Image header's `text_offset`,
+riscv64 `0x80000000`), its 64 KiB section alignment, and its build-time layout assertion
 (`struct.calcsize(...) == HEADER_SIZE`). A legacy C-blob packing path (which
 produced a `.c` array and used 4 KiB windows alignment) is superseded by the current
 flat-file packer and not carried.
@@ -29,7 +30,8 @@ flat-file packer and not carried.
 | **x86 entry = ELF `e_entry`** — `e_entry` is `startup_64`, the 64-bit boot_params entry; substrate enters there in 64-bit long mode (no PVH) | records `e_entry` | **same: `entry_addr` = `e_entry`** ([ADR 0004](../adr/0004-boot-contract-with-substrate.md)); no PVH note extraction | boot-smoke + an e_entry-extraction unit check |
 | **x86 `load_addr`** — recover the physical load base from the kernel virtual address | `p_vaddr & 0xFFFFFFF` (first PT_LOAD) | **same** `p_vaddr & 0xFFFFFFF`; cross-checked against `p_paddr` via the layout assert | bundle-golden + boot-smoke |
 | **PT_LOAD gap/overlap** — segments may have padding gaps; an overlap is corruption | pads gaps, errors on overlap | same: pad inter-segment gaps with zeros, **hard-error on overlap** (no silent truncation, CLAUDE.md §5) | packer self-assert + golden |
-| **aarch64 / riscv64 raw Image** | takes Image raw, hardcodes `load_addr` = `entry_addr` = `0x80000000` | **same** hardcoded `0x80000000` ([ADR 0004](../adr/0004-boot-contract-with-substrate.md)) | boot-smoke |
+| **aarch64 raw Image — the kernel must sit at the start of guest RAM** — any other base manufactures a RAM-size boot floor (ADR 0004's probe: ≤ ~1 GiB VMs failed to map the kernel section) | hardcodes a base with no header read | `load_addr` = `entry_addr` = the consumer's DRAM base `0x40000000` + `text_offset` **read from the Image header** (bytes 8..16 le64, magic `0x644d5241` validated, base asserted 2 MiB-aligned — `Documentation/arch/arm64/booting.rst`) | bundle-golden (pack() fixture locks the address) + boot-smoke |
+| **riscv64 raw Image** | takes Image raw, hardcodes the base | `load_addr` = `entry_addr` = `0x80000000` (the QEMU-virt riscv DRAM base; carried target — [ADR 0004](../adr/0004-boot-contract-with-substrate.md)) | bundle-golden (pack() fixture) |
 | **Section alignment vs host page size** | 64 KiB (current packer); 4 KiB windows lived in the legacy C-blob packer | **64 KiB normally; 4 KiB for the windows variant**, recorded in the header `page_size` field so it is self-describing ([ADR 0003](../adr/0003-kernel-bundle-format.md)) | bundle-golden (offsets % `page_size` == 0) |
 | **Absent sections** — qboot/initrd are TEE-only | offset/size = 0 when absent | base/windows bundles set qboot/initrd offset+size to 0; substrate treats 0 as absent | bundle-golden |
 
@@ -64,8 +66,14 @@ self-contained packer:
 - **x86_64:** parse the ELF, flatten PT_LOAD into a contiguous page-padded image
   (pad gaps, error on overlap), set `load_addr` = first PT_LOAD `p_vaddr & 0xFFFFFFF`
   and `entry_addr` = ELF `e_entry`.
-- **aarch64 / riscv64:** read the Image, page-pad; `load_addr` = `entry_addr` =
-  `0x80000000`.
+- **aarch64:** read the Image, page-pad; validate the arm64 Image magic
+  (`0x644d5241` at byte 56 — a wrong file is a hard error) and read `text_offset`
+  (bytes 8..16, little-endian) per `Documentation/arch/arm64/booting.rst`;
+  `load_addr` = `entry_addr` = the consumer's DRAM base `0x40000000` +
+  `text_offset` (base asserted 2 MiB-aligned), so the kernel sits at the start of
+  guest RAM (ADR 0004).
+- **riscv64:** read the Image, page-pad; `load_addr` = `entry_addr` = `0x80000000`
+  (the QEMU-virt riscv DRAM base).
 - `page_size` = `4096` for the windows variant, else `65536`; sections are aligned
   to `page_size` and the value is written into the header.
 - Assemble header + `page_size`-aligned sections; assert layout (header size,

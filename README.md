@@ -18,7 +18,9 @@ a fixed 96-byte header (`SUBK` magic, format/abi version, arch, variant, page si
 `load_addr`, `entry_addr`, and the kernel/qboot/initrd section ranges) followed by
 page-aligned payload sections. substrate reads the header, copies the kernel to
 `load_addr`, and enters at `entry_addr` — the x86 path is the 64-bit `boot_params`
-entry (`e_entry`); aarch64/riscv64 is the raw `Image` at `0x80000000`. See
+entry (`e_entry`); aarch64 is the raw `Image` at the consumer's DRAM base
+(`0x40000000` + the Image header's `text_offset`); riscv64 is the raw `Image` at
+`0x80000000`. See
 [ADR 0003](docs/adr/0003-kernel-bundle-format.md) / [ADR 0004](docs/adr/0004-boot-contract-with-substrate.md).
 
 ## Quick start

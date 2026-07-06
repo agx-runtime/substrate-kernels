@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
 """Unit checks for pack-kernel's address extraction (bundle-format.md).
 
-Locks the two highest-risk packer details against silent regression:
+Locks the highest-risk packer details against silent regression:
   * x86_64 ELF: `entry_addr` = raw ELF `e_entry` (NOT masked, NOT a PVH note),
     `load_addr` = first PT_LOAD `p_vaddr & 0xFFFFFFF`, with inter-segment gaps
     zero-padded and overlaps hard-erroring (ADR 0004 / CLAUDE.md §5).
-  * aarch64 / riscv64 raw Image: `load_addr` = `entry_addr` = 0x80000000, payload
-    page-padded.
+  * aarch64 Image: `load_addr` = `entry_addr` = the consumer's DRAM base
+    (0x40000000) + the header's `text_offset` (read, never assumed zero —
+    Documentation/arch/arm64/booting.rst), gated on the arm64 Image magic so a
+    wrong file hard-errors; payload page-padded.
+  * riscv64 raw Image: `load_addr` = `entry_addr` = 0x80000000 (the QEMU-virt
+    riscv DRAM base), payload page-padded.
 
 Needs pyelftools (the packer's ELF dependency). A missing dependency is a hard
 failure with a remediation hint, never a skip (CLAUDE.md §8).
@@ -122,27 +126,83 @@ def test_elf_overlap_errors():
     fail("overlapping PT_LOAD segments did not raise (silent truncation risk)")
 
 
-def test_raw_image():
+def build_arm64_image(text_offset, payload):
+    """Minimal arm64 Image: the 64-byte header of
+    Documentation/arch/arm64/booting.rst (text_offset le64 at byte 8, image_size
+    at 16, magic "ARM\\x64" at 56) followed by payload bytes."""
+    hdr = struct.pack("<II", 0x91005A4D, 0x14000000)  # code0, code1
+    hdr += struct.pack("<Q", text_offset)             # text_offset
+    hdr += struct.pack("<Q", 64 + len(payload))       # image_size
+    hdr += struct.pack("<Q", 0)                       # flags (LE, 4K, anywhere)
+    hdr += struct.pack("<QQQ", 0, 0, 0)               # res2..res4
+    hdr += struct.pack("<II", pk.ARM64_IMAGE_MAGIC, 0)  # magic, res5
+    assert len(hdr) == 64
+    return hdr + payload
+
+
+def test_arm64_image():
+    # text_offset = 0 is the pinned 6.12 reality; the nonzero case proves the
+    # base + text_offset math is computed from the header, never assumed zero.
+    for text_offset in (0, 0x80000):
+        img = build_arm64_image(text_offset, b"\x5a" * 1234)
+        with tempfile.NamedTemporaryFile(suffix=".img") as f:
+            f.write(img)
+            f.flush()
+            bundle = pk.pack(arch="aarch64", variant="base", abi_version=1,
+                             kernel=f.name)
+        load_addr, entry_addr = struct.unpack_from("<QQ", bundle, 24)
+        want = pk.RAW_LOAD_ADDR_AARCH64 + text_offset
+        if pk.RAW_LOAD_ADDR_AARCH64 != 0x40000000:
+            fail(f"aarch64 base {pk.RAW_LOAD_ADDR_AARCH64:#x} != 0x40000000 "
+                 f"(the consumer's DRAM base — ADR 0004)")
+        if load_addr != want:
+            fail(f"aarch64 load_addr {load_addr:#x} != base+text_offset {want:#x}")
+        if entry_addr != load_addr:
+            fail(f"aarch64 entry_addr {entry_addr:#x} != load_addr {load_addr:#x}")
+        # The kernel section carries the page-padded Image verbatim.
+        kernel_offset, kernel_size = struct.unpack_from("<QQ", bundle, 40)
+        section = bundle[kernel_offset:kernel_offset + kernel_size]
+        if len(section) != pk.PAGE_SIZE_DEFAULT:
+            fail(f"aarch64 kernel section not page-padded: {len(section):#x}")
+        if section[:len(img)] != img or section[len(img):] != b"\x00" * (len(section) - len(img)):
+            fail("aarch64 kernel section content/padding wrong")
+    # A payload without the arm64 Image magic must hard-error — never a silently
+    # mis-addressed bundle (CLAUDE.md §5).
+    with tempfile.NamedTemporaryFile(suffix=".img") as f:
+        f.write(b"\x5a" * 1234)
+        f.flush()
+        try:
+            pk.pack(arch="aarch64", variant="base", abi_version=1, kernel=f.name)
+        except ValueError:
+            print("[pack-unit] arm64 Image base+text_offset + magic gate OK")
+            return
+    fail("non-arm64-Image payload did not hard-error on the aarch64 path")
+
+
+def test_raw_image_riscv64():
     data = b"\x5a" * 1234
     with tempfile.NamedTemporaryFile(suffix=".img") as f:
         f.write(data)
         f.flush()
         payload = pk.flatten_raw(f.name, pk.PAGE_SIZE_DEFAULT)
+        bundle = pk.pack(arch="riscv64", variant="base", abi_version=1,
+                         kernel=f.name)
     if len(payload) != pk.PAGE_SIZE_DEFAULT:
         fail(f"raw payload not page-padded: {len(payload):#x}")
     if payload[:1234] != data or payload[1234:] != b"\x00" * (pk.PAGE_SIZE_DEFAULT - 1234):
         fail("raw payload content/padding wrong")
-    # The aarch64/riscv64 address path is the hardcoded base.
-    if pk.RAW_LOAD_ADDR != 0x80000000:
-        fail(f"RAW_LOAD_ADDR {pk.RAW_LOAD_ADDR:#x} != 0x80000000")
-    print("[pack-unit] raw Image padding + 0x80000000 base OK")
+    load_addr, entry_addr = struct.unpack_from("<QQ", bundle, 24)
+    if load_addr != 0x80000000 or entry_addr != 0x80000000:
+        fail(f"riscv64 load/entry {load_addr:#x}/{entry_addr:#x} != 0x80000000")
+    print("[pack-unit] riscv64 raw Image padding + 0x80000000 base OK")
 
 
 def main():
     require_pyelftools()
     test_elf_entry_and_load()
     test_elf_overlap_errors()
-    test_raw_image()
+    test_arm64_image()
+    test_raw_image_riscv64()
     print("[pack-unit] PASS")
 
 
