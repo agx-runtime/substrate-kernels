@@ -22,10 +22,10 @@
 
 // Branded ID types — match analytics/packages/shared/src/event.ts so the
 // shape is recognizable, even though we don't import from there.
-type AnonymousId = string & { readonly __brand: 'AnonymousId' };
-type UserId = string & { readonly __brand: 'UserId' };
-type GroupId = string & { readonly __brand: 'GroupId' };
-type MessageId = string & { readonly __brand: 'MessageId' };
+type AnonymousId = string & { readonly __brand: "AnonymousId" };
+type UserId = string & { readonly __brand: "UserId" };
+type GroupId = string & { readonly __brand: "GroupId" };
+type MessageId = string & { readonly __brand: "MessageId" };
 
 // `source` is an open set per the analytics queue-protocol spec — any
 // non-empty bounded label (≤ MAX_SOURCE_LENGTH = 64) is accepted. This
@@ -39,15 +39,15 @@ type MessageId = string & { readonly __brand: 'MessageId' };
 type EventSource = string;
 
 /** The literal event_name this Worker stamps on every download event. */
-const EVENT_NAME = 'kernel_download';
+const EVENT_NAME = "kernel_download";
 
 // Where a caller-supplied anonymous id can arrive. The CLI sets the header;
 // the listing page sets the cookie (from the RudderStack SDK's anonymous id)
 // so a same-origin download navigation carries it — that is what correlates
 // the page's `kernel_download_click` with this server-side `kernel_download`
 // (docs/adr/0012). Absent/invalid → a fresh random UUID (no continuity).
-const ANON_ID_HEADER = 'X-Substrate-Anonymous-Id';
-const ANON_ID_COOKIE = 'substrate_aid';
+const ANON_ID_HEADER = "X-Substrate-Anonymous-Id";
+const ANON_ID_COOKIE = "substrate_aid";
 /** Bounds + charset for an accepted anonymous id (≤128 = analytics MAX_ID_LENGTH). */
 const ANON_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
 
@@ -58,76 +58,86 @@ const ANON_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
  * it into typed subcolumns — do NOT stringify.
  */
 export interface QueueEvent {
-  message_id: MessageId;
-  source: EventSource;
-  event_name: string;
+	message_id: MessageId;
+	source: EventSource;
+	event_name: string;
 
-  anonymous_id: AnonymousId | null;
-  user_id: UserId | null;
-  group_id: GroupId | null;
+	anonymous_id: AnonymousId | null;
+	user_id: UserId | null;
+	group_id: GroupId | null;
 
-  /** ISO 8601, event time. */
-  timestamp: string;
-  /** ISO 8601, ingest time. For a proxy download these coincide. */
-  received_at: string;
+	/** ISO 8601, event time. */
+	timestamp: string;
+	/** ISO 8601, ingest time. For a proxy download these coincide. */
+	received_at: string;
 
-  ip: string | null;
-  ip_asn: number | null;
-  ip_org: string | null;
-  ip_country: string | null;
-  ip_city: string | null;
-  user_agent: string | null;
+	ip: string | null;
+	ip_asn: number | null;
+	ip_org: string | null;
+	ip_country: string | null;
+	ip_city: string | null;
+	user_agent: string | null;
 
-  properties: Record<string, unknown>;
+	properties: Record<string, unknown>;
 }
+
+/**
+ * The queue carries a TAGGED UNION, not a bare event — the analytics consumer
+ * (`workers/consumer` `splitBatch`) switches on `body.kind` and inserts nothing
+ * for an unrecognized shape (it still acks, so a raw event is silently dropped:
+ * `outcome: ok`, no row). A download event MUST be wrapped `{ kind: 'event',
+ * event }` to match `@analytics/shared`'s `QueueMessage` + the reference
+ * `proxy-producer`.
+ */
+export type QueueMessage = { kind: "event"; event: QueueEvent };
 
 /** What the Worker must have on `env` for `recordDownload` to work. */
 export interface ProxyEnv {
-  /** Producer binding for the analytics events queue. */
-  EVENTS_QUEUE: Queue<QueueEvent>;
+	/** Producer binding for the analytics events queue. */
+	EVENTS_QUEUE: Queue<QueueMessage>;
 }
 
 /** What the caller tells the producer about the download in flight. */
 export interface DownloadFact {
-  /** The artifact identifier — for kernel bundles, "linux-<variant>-<arch>". */
-  package: string;
-  /** The pinned kernel version, e.g. "6.12.91". */
-  version: string;
-  /** The Content-Length the proxy is about to send. */
-  bytes: number;
+	/** The artifact identifier — for kernel bundles, "linux-<variant>-<arch>". */
+	package: string;
+	/** The pinned kernel version, e.g. "6.12.91". */
+	version: string;
+	/** The Content-Length the proxy is about to send. */
+	bytes: number;
 }
 
 function enrichFromRequest(req: Request): {
-  ip: string | null;
-  ip_asn: number | null;
-  ip_org: string | null;
-  ip_country: string | null;
-  ip_city: string | null;
-  user_agent: string | null;
+	ip: string | null;
+	ip_asn: number | null;
+	ip_org: string | null;
+	ip_country: string | null;
+	ip_city: string | null;
+	user_agent: string | null;
 } {
-  // `request.cf` is populated by Cloudflare's edge in production. In local
-  // `wrangler dev` it can be undefined for some configurations — fall back
-  // to nulls so the producer never throws.
-  const cf = req.cf as IncomingRequestCfProperties | undefined;
-  return {
-    ip: req.headers.get('CF-Connecting-IP'),
-    ip_asn: cf?.asn ?? null,
-    ip_org: cf?.asOrganization ?? null,
-    ip_country: cf?.country ?? null,
-    ip_city: cf?.city ?? null,
-    user_agent: req.headers.get('User-Agent'),
-  };
+	// `request.cf` is populated by Cloudflare's edge in production. In local
+	// `wrangler dev` it can be undefined for some configurations — fall back
+	// to nulls so the producer never throws.
+	const cf = req.cf as IncomingRequestCfProperties | undefined;
+	return {
+		ip: req.headers.get("CF-Connecting-IP"),
+		ip_asn: cf?.asn ?? null,
+		ip_org: cf?.asOrganization ?? null,
+		ip_country: cf?.country ?? null,
+		ip_city: cf?.city ?? null,
+		user_agent: req.headers.get("User-Agent"),
+	};
 }
 
 /** Read one cookie value out of a `Cookie` header (case-sensitive name). */
 function parseCookie(header: string | null, name: string): string | null {
-  if (header === null) return null;
-  for (const part of header.split(';')) {
-    const eq = part.indexOf('=');
-    if (eq < 0) continue;
-    if (part.slice(0, eq).trim() === name) return part.slice(eq + 1).trim();
-  }
-  return null;
+	if (header === null) return null;
+	for (const part of header.split(";")) {
+		const eq = part.indexOf("=");
+		if (eq < 0) continue;
+		if (part.slice(0, eq).trim() === name) return part.slice(eq + 1).trim();
+	}
+	return null;
 }
 
 /**
@@ -138,16 +148,18 @@ function parseCookie(header: string | null, name: string): string | null {
  * through to random.
  */
 function resolveAnonymousId(req: Request): AnonymousId {
-  const header = req.headers.get(ANON_ID_HEADER);
-  if (header !== null && ANON_ID_PATTERN.test(header)) return header as AnonymousId;
-  const cookie = parseCookie(req.headers.get('Cookie'), ANON_ID_COOKIE);
-  if (cookie !== null && ANON_ID_PATTERN.test(cookie)) return cookie as AnonymousId;
-  return crypto.randomUUID() as AnonymousId;
+	const header = req.headers.get(ANON_ID_HEADER);
+	if (header !== null && ANON_ID_PATTERN.test(header))
+		return header as AnonymousId;
+	const cookie = parseCookie(req.headers.get("Cookie"), ANON_ID_COOKIE);
+	if (cookie !== null && ANON_ID_PATTERN.test(cookie))
+		return cookie as AnonymousId;
+	return crypto.randomUUID() as AnonymousId;
 }
 
 /** `source` = `WEB:<HOSTNAME UPPERCASE>` derived from the request's host. */
 function webSource(req: Request): EventSource {
-  return `WEB:${new URL(req.url).hostname.toUpperCase()}`;
+	return `WEB:${new URL(req.url).hostname.toUpperCase()}`;
 }
 
 /**
@@ -156,42 +168,44 @@ function webSource(req: Request): EventSource {
  * health.
  */
 export async function recordDownload(
-  req: Request,
-  env: ProxyEnv,
-  download: DownloadFact,
+	req: Request,
+	env: ProxyEnv,
+	download: DownloadFact,
 ): Promise<void> {
-  const now = new Date().toISOString();
-  const event: QueueEvent = {
-    message_id: crypto.randomUUID() as MessageId,
-    source: webSource(req),
-    event_name: EVENT_NAME,
+	const now = new Date().toISOString();
+	const event: QueueEvent = {
+		message_id: crypto.randomUUID() as MessageId,
+		source: webSource(req),
+		event_name: EVENT_NAME,
 
-    // Caller-supplied id (CLI header / browser cookie) or a fresh random
-    // UUID — the proxy has no auth context of its own (resolveAnonymousId).
-    anonymous_id: resolveAnonymousId(req),
-    user_id: null,
-    group_id: null,
+		// Caller-supplied id (CLI header / browser cookie) or a fresh random
+		// UUID — the proxy has no auth context of its own (resolveAnonymousId).
+		anonymous_id: resolveAnonymousId(req),
+		user_id: null,
+		group_id: null,
 
-    timestamp: now,
-    received_at: now,
+		timestamp: now,
+		received_at: now,
 
-    ...enrichFromRequest(req),
+		...enrichFromRequest(req),
 
-    properties: {
-      package: download.package,
-      version: download.version,
-      bytes: download.bytes,
-    },
-  };
+		properties: {
+			package: download.package,
+			version: download.version,
+			bytes: download.bytes,
+		},
+	};
 
-  try {
-    await env.EVENTS_QUEUE.send(event);
-  } catch (e) {
-    // Drop the event. NEVER surface an analytics failure to the caller —
-    // a failed kernel download is much worse than a missed metric.
-    console.error('download-proxy: analytics queue send failed', {
-      message_id: event.message_id,
-      err: e instanceof Error ? e.message : String(e),
-    });
-  }
+	try {
+		// Wrap in the tagged-union envelope the consumer routes on — a bare event
+		// is acked-but-never-inserted (its `kind` is undefined).
+		await env.EVENTS_QUEUE.send({ kind: "event", event });
+	} catch (e) {
+		// Drop the event. NEVER surface an analytics failure to the caller —
+		// a failed kernel download is much worse than a missed metric.
+		console.error("download-proxy: analytics queue send failed", {
+			message_id: event.message_id,
+			err: e instanceof Error ? e.message : String(e),
+		});
+	}
 }
