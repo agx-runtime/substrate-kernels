@@ -26,6 +26,7 @@ Context → Decision → Consequences → Alternatives considered, with a `Statu
 | [0013](0013-debug-variant.md) | The debug variant | Accepted | a second variant per (x86_64, aarch64) carrying ftrace, kprobes, BPF tracing, DWARF5/BTF debug info, and kgdb on top of `base`, distributed alongside base via CI + release.yml; bundle `variant = 4` |
 | [0014](0014-container-runtime-networking.md) | Container-runtime networking (in-guest Docker) | Accepted | design/kernel-config.md — completes the netfilter/bridge/NAT surface (xt `addrtype`, nft/legacy masquerade+reject, ip6tables, VXLAN/MACVLAN/IPVLAN) so `dockerd` runs in the guest; carried on base/debug (x86_64, aarch64) + riscv64 base, gated by config-invariant |
 | [0015](0015-drop-tsi-and-x86-acpi-legacy-pic.md) | Drop the TSI patches and the x86 ACPI legacy_pic patch | Accepted | design/patches.md — drops TSI (`0009`/`0010`, + `CONFIG_TSI`) and the x86 `legacy_pic` fix (`0101`) to trim downstream maintenance; **amends ADR 0008** (TSI no longer carried); records the latent x86 HW_REDUCED-boot risk |
+| [0016](0016-release-provenance-attestation.md) | Release provenance attestation | Accepted | release.yml — SLSA build provenance (keyless sigstore via GitHub OIDC) on every release artifact, verified with `gh attestation verify`; the sigstore bundle ships as a release asset and is mirrored to R2 (`linux-<version>-attestations.sigstore.jsonl`) |
 
 0001 establishes the convention and fixes the pin that roots reproducibility.
 0002–0004 fix the artifact's shape (architectures, bundle format, boot contract).
@@ -41,5 +42,7 @@ download-click to the proxy's server-side download event via a same-origin cooki
 (netfilter/bridge/NAT) on the guest-model cells so a substrate guest can run a
 container engine such as `dockerd`, gating the set with config-invariant. 0015 trims
 the downstream surface — dropping the TSI patches (and `CONFIG_TSI`) and the x86
-`legacy_pic` fix — and amends 0008 (TSI is no longer a carried capability).
+`legacy_pic` fix — and amends 0008 (TSI is no longer a carried capability). 0016
+adds SLSA build-provenance attestation to every release artifact, keyless and
+verifiable with `gh attestation verify`.
 Further decisions get their own numbered ADR here as they land.

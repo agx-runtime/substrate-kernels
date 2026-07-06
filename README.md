@@ -87,14 +87,27 @@ same paths; observability is new.
   re-releasing the same kernel after a patch/config change without a pin bump.
 - **To cut a release:** bump the pin if needed (and re-validate the series + configs
   + boot), then either push a `v*` tag or run the **Release** workflow manually
-  (optionally with a `revision`). The workflow builds `base × {x86_64, aarch64}`,
-  writes `SHA256SUMS`, creates the GitHub Release, and uploads to R2.
+  (optionally with a `revision`). The workflow builds `{base, debug} × {x86_64,
+  aarch64}`, writes `SHA256SUMS`, attests build provenance
+  ([ADR 0016](docs/adr/0016-release-provenance-attestation.md)), creates the GitHub
+  Release, and uploads to R2.
 - **Public URLs** (bucket root): each bundle is served at
   `https://kernels.substrate.so/linux-<version>-base-<arch>.kernel`,
-  with checksums at `…/linux-<version>-SHA256SUMS`. Configure the repo **secret**
-  `CLOUDFLARE_API_TOKEN` and the repo **variables** `CLOUDFLARE_ACCOUNT_ID` +
+  with checksums at `…/linux-<version>-SHA256SUMS`. Configure the repo **secrets**
+  `CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID` and the repo **variable**
   `R2_BUCKET` (R2 upload is skipped if the token is unset, so the GitHub Release
   still publishes).
+- **Provenance:** every artifact carries a SLSA build-provenance attestation
+  (keyless sigstore via GitHub OIDC — no signing keys). Verify any downloaded
+  bundle, wherever it came from, with:
+
+  ```sh
+  gh attestation verify linux-<version>-<variant>-<arch>.kernel \
+      --repo agx-runtime/substrate-kernels
+  ```
+
+  The sigstore bundle also ships as a release asset and R2 object
+  (`linux-<version>-attestations.sigstore.jsonl`).
 
 Because the build is byte-reproducible (`make repro-check`), a published bundle's
 sha256 is a stable content identity you can attest and cache against.

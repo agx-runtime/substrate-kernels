@@ -1,14 +1,16 @@
 name: Release
 
-# Build the .kernel bundles and publish them as a GitHub Release + mirror to
-# Cloudflare R2. Triggered by pushing a `v*` tag, or run manually (workflow_dispatch)
-# to cut a release from the current commit. The kernel version comes from the pin
-# (scripts/kernel-pin.env); the release tag is `v<version>` (or `v<version>-r<N>`
-# for a re-release of the same kernel after a patch/config change). CI gates the
-# commit; this workflow only builds + publishes. R2 upload is skipped if the
-# Cloudflare credentials are unset, so the GitHub Release still publishes.
+# Build the .kernel bundles, attest their build provenance (ADR 0016), and publish
+# them as a GitHub Release + mirror to Cloudflare R2. Triggered by pushing a `v*`
+# tag, or run manually (workflow_dispatch) to cut a release from the current
+# commit. The kernel version comes from the pin (scripts/kernel-pin.env); the
+# release tag is `v<version>` (or `v<version>-r<N>` for a re-release of the same
+# kernel after a patch/config change). CI gates the commit; this workflow only
+# builds + publishes. R2 upload is skipped if the Cloudflare credentials are unset,
+# so the GitHub Release still publishes.
 #
 # Config: secrets CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID; variable R2_BUCKET.
+# Attestation needs no secrets — keyless sigstore signing via the job's OIDC token.
 
 on:
   push:
@@ -92,10 +94,14 @@ jobs:
           path: linux-${{ needs.prepare.outputs.version }}-${{ matrix.variant }}-${{ matrix.arch }}.kernel
           if-no-files-found: error
 
-  # ---- publish: GitHub Release + Cloudflare R2 ----------------------------------
+  # ---- publish: attest + GitHub Release + Cloudflare R2 --------------------------
   publish:
     needs: [prepare, build]
     runs-on: nscloud-ubuntu-24.04-amd64-2x4
+    permissions:
+      contents: write # create the GitHub Release
+      id-token: write # keyless sigstore signing (GitHub OIDC) for the attestation
+      attestations: write # store the provenance attestation on GitHub (ADR 0016)
     env:
       VERSION: ${{ needs.prepare.outputs.version }}
       TAG: ${{ needs.prepare.outputs.tag }}
@@ -116,6 +122,19 @@ jobs:
             "linux-${VERSION}-debug-x86_64.kernel" \
             "linux-${VERSION}-debug-aarch64.kernel" \
             | tee SHA256SUMS
+      # SLSA build provenance for every published artifact (ADR 0016): keyless
+      # sigstore signing via GitHub OIDC; the attestation is stored on GitHub
+      # (verifiable with `gh attestation verify`) and the bundle is mirrored as a
+      # release asset + R2 object below.
+      - name: Attest bundle provenance
+        id: attest
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            linux-${{ env.VERSION }}-*.kernel
+            SHA256SUMS
+      - name: Stage the attestation bundle as a release artifact
+        run: cp "${{ steps.attest.outputs.bundle-path }}" "linux-${VERSION}-attestations.sigstore.jsonl"
       - name: Write release notes
         run: |
           set -euo pipefail
@@ -130,6 +149,35 @@ jobs:
           - \`linux-$VERSION-debug-x86_64.kernel\` / \`linux-$VERSION-debug-aarch64.kernel\`
             — same kernel + ftrace, kprobes, BPF tracing, BTF, DWARF5, kgdb (ADR 0013).
           - \`SHA256SUMS\` — checksums for all four bundles.
+          - \`linux-$VERSION-attestations.sigstore.jsonl\` — the SLSA build-provenance
+            attestation bundle covering every artifact above (ADR 0016).
+
+          **aarch64 boot contract (ADR 0004):** aarch64 bundles load at the consumer's
+          DRAM base — \`load_addr = entry_addr = 0x40000000\` (+ the Image header's
+          \`text_offset\`), so the kernel sits at the start of guest RAM and any RAM
+          size that holds the image boots. Bundles published before this contract
+          revision loaded at \`0x80000000\` and imposed a ~1 GiB RAM boot floor.
+
+          **Sequencing warning — substrate must converge before consuming these
+          bundles:** a substrate that still writes its initial VMGENID GUID at
+          RAM_BASE + 1 MiB (\`0x40100000\`) will corrupt 16 bytes of kernel text
+          before the first instruction executes when the kernel loads at
+          \`0x40000000\` (a nondeterministic crash). substrate must NOT bump its
+          kernel pin until its guest-layout change (VMGENID relocation + the
+          cold_boot \`load_addr\` validation) has landed. The reverse direction is
+          safe: an old \`0x80000000\` bundle under the converged substrate is
+          rejected with a typed cold_boot error.
+
+          **Re-released artifacts** replace same-named R2 objects. The download
+          proxy serves \`.kernel\` files with a 1-year immutable cache policy, so a
+          CF edge that already served an older byte-stream may keep serving it
+          until purged or evicted; \`linux-$VERSION-SHA256SUMS\` (5-minute cache) is
+          the source of truth for which bytes are current.
+
+          **Provenance:** every artifact carries SLSA build provenance (keyless
+          sigstore signing via GitHub OIDC). Verify with:
+
+              gh attestation verify linux-$VERSION-base-x86_64.kernel --repo $GITHUB_REPOSITORY
 
           Builds are byte-reproducible, so each bundle's sha256 is a stable content
           identity. Also published to Cloudflare R2, served at
@@ -145,6 +193,7 @@ jobs:
             "linux-${VERSION}-debug-x86_64.kernel"
             "linux-${VERSION}-debug-aarch64.kernel"
             SHA256SUMS
+            "linux-${VERSION}-attestations.sigstore.jsonl"
           )
           # Idempotent: if a prior run already created the release (e.g. the R2 mirror
           # failed afterwards), re-attach the assets instead of failing on collision.
@@ -195,3 +244,12 @@ jobs:
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           # version-scoped so successive releases don't clobber it at the bucket root
           command: r2 object put "${{ vars.R2_BUCKET }}/linux-${{ env.VERSION }}-SHA256SUMS" --file=SHA256SUMS --remote
+      - name: Upload the attestation bundle to R2
+        if: ${{ env.CF_TOKEN != '' }}
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          # offline mirror of the provenance attestation (ADR 0016); the primary
+          # verify path is GitHub's attestation store via `gh attestation verify`
+          command: r2 object put "${{ vars.R2_BUCKET }}/linux-${{ env.VERSION }}-attestations.sigstore.jsonl" --file=linux-${{ env.VERSION }}-attestations.sigstore.jsonl --remote

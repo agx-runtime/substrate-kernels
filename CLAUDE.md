@@ -386,6 +386,7 @@ a code span or code fence is ignored, which would silently drop the file.
 @docs/adr/0013-debug-variant.md
 @docs/adr/0014-container-runtime-networking.md
 @docs/adr/0015-drop-tsi-and-x86-acpi-legacy-pic.md
+@docs/adr/0016-release-provenance-attestation.md
 @docs/adr/README.md
 
 ### Component design notes (docs/design/)
