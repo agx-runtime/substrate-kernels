@@ -30,24 +30,27 @@ delegation to a Linux VM builder.
 The Makefile targets, in dependency order (names indicative; the canonical roadmap
 is [architecture.md](../architecture.md) §7):
 
-- **`tarball`** — fetch `linux-<version>.tar.xz` from the pin, verify sha256.
+- **pin selection** — `KERNEL_LINE` selects `scripts/kernel-pins/<line>.env`;
+  each line supplies its own exact version, tarball URL, and sha256.
+- **`tarball`** — fetch `linux-<version>.tar.xz` from the selected pin, verify sha256.
 - **`source`** — extract into a derived (ignored) working tree.
-- **`patched`** — apply `patches/NNNN-*.patch` at `-p1` (zero fuzz); for sev/tdx
-  also apply `patches-tee/` ([ADR 0009](../adr/0009-confidential-compute-variants.md)).
+- **`patched`** — apply the selected line's `patches/<line>/NNNN-*.patch` at
+  `-p1` with zero fuzz and zero offset.
 - **`configured`** — copy `config-<variant>_<arch>` → `.config`; `make olddefconfig`;
   run the config-invariant gate.
 - **`compiled`** — `make` with fixed `KBUILD_BUILD_*`; output `vmlinux` (x86_64) or
   `arch/arm64/boot/Image` (aarch64).
 - **`bundle`** — `pack-kernel` flattens + headers + 64 KiB-aligns into
-  `<version>-<variant>-<arch>.kernel` ([bundle-format.md](bundle-format.md)).
+  `linux-<version>-<variant>-<arch>.kernel` ([bundle-format.md](bundle-format.md)).
 
 Cross-cutting:
 
 - **`install`** — stage the bundle to `$(PREFIX)/lib/substrate/kernels/`
   (substrate-native path).
-- **Variant + arch selection** — `VARIANT` ∈ {base, sev, tdx}, `ARCH` ∈ {x86_64,
-  aarch64}; sev/tdx are x86-only ([ADR 0002](../adr/0002-target-architectures.md),
-  [ADR 0009](../adr/0009-confidential-compute-variants.md)).
+- **Line + variant + arch selection** — `KERNEL_LINE` is `6.12` or `6.18`;
+  release variants are base/debug for x86_64 and aarch64. riscv64-base and
+  x86_64-windows remain buildable but are outside the release boot matrix
+  ([ADR 0002](../adr/0002-target-architectures.md)).
 - **Container vs native** — on macOS, the Linux stages run in
   `tools/build/Dockerfile`; on Linux, natively against the same pinned toolchain
   ([reproducibility.md](reproducibility.md)).

@@ -66,12 +66,14 @@ The discipline for each piece of the build:
 - **A fast-booting, monolithic, virtio-only kernel** for the substrate guest.
 - **Architectures: x86_64 and aarch64** ([ADR 0002](docs/adr/0002-target-architectures.md)).
 - **The device drivers substrate's feature contract needs** — virtio block, net,
-  vsock (incl. datagrams), console, rng, and virtio-fs/DAX (substrate's optional
-  `--volume` mounts) — a fixed per-variant feature set
+  vsock streams, console, rng, and DAX-less virtio-fs (substrate's
+  optional volume mounts) — a fixed per-variant feature set
   ([ADR 0008](docs/adr/0008-kernel-capability-surface-vs-vmm-scope.md)). (Kernel-side
   TSI was carried but has since been dropped — [ADR 0015](docs/adr/0015-drop-tsi-and-x86-acpi-legacy-pic.md).)
-- **Orderly shutdown when the guest entrypoint (PID 1) exits** — a microVM reboots
-  cleanly, it does not panic ([design/patches.md](docs/design/patches.md)).
+- **Orderly shutdown through `init.substrate`** — the default mode keeps the
+  supervisor as PID 1, reaps the entrypoint, reports its status, and invokes
+  `reboot(2)`; stock Linux PID-1 panic semantics remain intact for direct-exec
+  systemd-style guests ([design/patches.md](docs/design/patches.md)).
 - **The pre-flattened kernel bundle** substrate mmaps and enters directly
   ([ADR 0004](docs/adr/0004-boot-contract-with-substrate.md)).
 - **Byte-reproducible builds** ([ADR 0005](docs/adr/0005-build-environment-and-reproducibility.md)).
@@ -79,11 +81,13 @@ The discipline for each piece of the build:
 ### Scope — what the kernel must not contain (OUT)
 
 GPU / virtio-gpu / DRM (explicitly cut — substrate has no display path), virtio-CAN
-(no substrate consumer), loadable modules, and every driver class a microVM never
-sees (USB, sound, most PCI). Confidential-compute (**TEE / SEV / TDX**) is *out of
-the base kernel* and lives only behind opt-in build variants
-([ADR 0009](docs/adr/0009-confidential-compute-variants.md)); base substrate does
-not consume it. The boundary between "capability the kernel carries" and "device
+(no substrate consumer), virtio-fs DAX (substrate exposes no shared-memory window),
+virtio-RTC (substrate exposes PL031 on arm64 and architectural clocks), loadable
+modules, and every driver class a microVM never sees (USB, sound, most PCI).
+Confidential-compute (**TEE / SEV / TDX**) is out: substrate has no corresponding
+machine model, and the old deferred variants were never releasable
+([ADR 0009](docs/adr/0009-confidential-compute-variants.md)). The boundary between
+"capability the kernel carries" and "device
 substrate exposes" is [ADR 0008](docs/adr/0008-kernel-capability-surface-vs-vmm-scope.md).
 
 The **riscv64 and windows** configs *are* carried
@@ -136,7 +140,7 @@ patch series, and config produce a **byte-identical** `.kernel` on any host.
 These are laws, not aspirations ([ADR 0005](docs/adr/0005-build-environment-and-reproducibility.md)).
 
 - **Pinned source.** The kernel tarball is fetched at a pinned version and
-  verified against a checked-in sha256 (`scripts/kernel-pin.env`). A bump is an
+  verified against a checked-in sha256 (`scripts/kernel-pins/<line>.env`). A bump is an
   explicit, reviewed change, never a silent "latest."
 - **Pinned toolchain.** The compiler, binutils, and build utilities live in a
   digest-pinned container (`tools/build/Dockerfile`). Kernel output is sensitive
@@ -163,7 +167,7 @@ These are laws, not aspirations ([ADR 0005](docs/adr/0005-build-environment-and-
   configured, never patched. Source patches are reserved for changes the config
   cannot express ([ADR 0006](docs/adr/0006-kernel-config-strategy.md),
   [ADR 0007](docs/adr/0007-patch-management-policy.md)).
-- **One config per (arch, variant).** x86_64 / aarch64 × base / sev / tdx, each a
+- **One config per (arch, variant).** x86_64 / aarch64 × base / debug, each a
   full `.config` normalized by `make olddefconfig`, with the deltas between them
   documented ([design/kernel-config.md](docs/design/kernel-config.md)).
 - **The bundle header is the producer↔consumer seam.** It is the one contract
@@ -261,9 +265,10 @@ security regression the host inherits. So:
 - **A version bump re-validates the whole series.** Bumping the pin
   ([ADR 0001](docs/adr/0001-kernel-source-pin-and-update-lifecycle.md)) means
   re-deriving any patch that no longer applies clean — never forcing it with fuzz.
-- **TEE patches are quarantined.** The confidential-compute series is a separate,
-  opt-in set that never touches a base build
-  ([ADR 0009](docs/adr/0009-confidential-compute-variants.md)).
+- **Unsupported patches do not live here as inventory.** The old confidential-
+  compute series was removed because substrate has no matching SEV-SNP/TDX
+  machine model or boot path ([ADR 0009](docs/adr/0009-confidential-compute-variants.md)).
+  Reintroducing it requires a bootable end-to-end feature, not compile-only files.
 
 The carried series, grouped by theme with a keep/drop rationale for each, is
 [design/patches.md](docs/design/patches.md).
@@ -280,8 +285,8 @@ builds.*
   consequences → alternatives considered**, with a `Status` / `Date` / `Context
   doc` header. The accepted ADRs fix the source pin, the architectures, the bundle
   format, the boot contract, reproducibility, the config strategy, the patch
-  policy, the capability/scope boundary, the TEE variants, and the doc-loading
-  manifest — read them before revisiting those.
+  policy, the capability/scope boundary, the removal of the former TEE variants,
+  and the doc-loading manifest — read them before revisiting those.
 - **Design documents** in `docs/design/` ([index](docs/design/README.md)): each
   build component (the pipeline, the bundle format, the config, the patch series,
   the initramfs, reproducibility) carries a doc that records

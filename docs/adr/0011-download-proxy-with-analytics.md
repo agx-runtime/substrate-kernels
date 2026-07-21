@@ -42,7 +42,8 @@ repo and referenced here only as a dependency.
    directory (its own `package.json`, `tsconfig.json`, `vitest.config.ts`,
    `wrangler.toml`, `src/`, `test/`, `README.md`). It does NOT integrate
    into the kernel-build Makefile — it has a different lifecycle (Worker
-   code rarely changes; kernel releases happen on tag pushes).
+   code rarely changes; kernel releases are manually dispatched for an exact
+   repository commit).
 
 2. **The Worker is bound to both
    `kernels.substrate.so` and `kernels.agx.so`** via
@@ -89,7 +90,7 @@ repo and referenced here only as a dependency.
 5. **The `(package, version)` split** on the event matches what the
    filename already encodes: `package = "linux-<variant>-<arch>"`
    (e.g. `"linux-base-x86_64"`), `version = "<version>"` (e.g.
-   `"6.12.91"`); `SHA256SUMS` rows use `package = "linux-SHA256SUMS"`,
+   `"6.12.96"`); `SHA256SUMS` rows use `package = "linux-SHA256SUMS"`,
    `version = "<version>"`. The shape is dashboard-friendly: GROUP BY
    `package` gives per-(variant,arch) totals; GROUP BY `version` gives
    release-adoption over time.
@@ -155,7 +156,7 @@ repo and referenced here only as a dependency.
   ship an install wrapper that injects a token — each add operational
   surface for no functional benefit at this scale. The hand-roll path
   is the cheaper equivalent.
-- **Couple deploy to release.yml on tag push.** Rejected: the Worker
+- **Couple deploy to each release dispatch.** Rejected: the Worker
   has no version-locked dependency on a specific kernel build. False
   coupling would mean "redeploy the Worker on every kernel release" for
   no functional reason. Manual deploy keeps the lifecycles independent.

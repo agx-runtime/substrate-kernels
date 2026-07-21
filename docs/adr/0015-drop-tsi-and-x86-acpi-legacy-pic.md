@@ -32,9 +32,9 @@ We are trimming the downstream surface to reduce that maintenance and audit cost
 ## Decision
 
 1. **Drop the two TSI patches and the `legacy_pic` patch** from `patches/`:
-   `0009`, `0010`, `0101`. The series numbering keeps its gaps (0009/0010/0101 simply
-   absent); the reduced series still applies at `-p1` with zero fuzz (base +
-   `patches-tee`).
+   `0009`, `0010`, `0101`. The then-current series kept those gaps and still
+   applied at `-p1` with zero fuzz. The later 2026-07-20 audit removed the unused
+   TEE and DGRAM series and renumbered the three surviving patches contiguously.
 
 2. **Remove `CONFIG_TSI` everywhere it was referenced.** It is stripped from all
    configs (it was `=y` in every cell) and from `scripts/config-invariant.py`
@@ -51,8 +51,8 @@ We are trimming the downstream surface to reduce that maintenance and audit cost
    contract).
 
 4. **Only the `legacy_pic` half of the x86 ACPI fixes is dropped.**
-   `0100-ACPICA-skip-PCI_CONFIG-when-CONFIG_PCI-off` is **kept** — it is a smaller,
-   still-needed fix for the PCI-off ACPI path.
+   The ACPICA `PCI_CONFIG` guard is **kept**, re-derived as current patch `0002` —
+   it is a smaller, still-needed fix for the PCI-off ACPI path.
 
 ## Consequences
 
@@ -65,15 +65,11 @@ We are trimming the downstream surface to reduce that maintenance and audit cost
   surface of [ADR 0014](0014-container-runtime-networking.md) — or a host-side
   mechanism). This is the substantive capability change and the reason ADR 0008 is
   amended.
-- **Latent x86-boot risk from the `legacy_pic` drop (accepted, recorded).** Under
-  substrate's 64-bit direct-boot with HW_REDUCED ACPI and PCI off, ACPI init can
-  null-deref on `legacy_pic`. **The interim boot-smoke does not catch this**: it
-  boots under QEMU (which presents a legacy PIC, so the path is not exercised) and
-  only watches for the early `"Linux version"` banner, which prints *before* ACPI
-  init ([boot-smoke.md](../testing/boot-smoke.md)). So CI stays green while the
-  regression is invisible until substrate's real x86 boot exercises it. Revisit /
-  restore `0101` (a one-line series re-addition) if that path is hit; `0100` still
-  covers the PCI_CONFIG handler.
+- **The former latent x86-boot risk is now closed by a real gate.** Both LTS lines
+  boot through substrate's 64-bit HW_REDUCED/PCI-off machine on AMD and Intel,
+  reach `ACPI: Interpreter enabled`, and probe their DSDT-enumerated virtio
+  devices without `legacy_pic`. This is stronger than the old early-banner QEMU
+  check and is the removal evidence for `0101`.
 - **Build + static gates unaffected.** base x86_64 and aarch64 compile clean without
   the dropped patches; `applies-clean` covers the reduced series; `config-invariant`
   no longer requires `CONFIG_TSI`; the bundle format is unchanged.
@@ -89,8 +85,9 @@ We are trimming the downstream surface to reduce that maintenance and audit cost
 - **Keep `0101`** — rejected: it is part of the same downstream-trim; the risk is
   latent and explicitly recorded, and it can be restored in one line if substrate's
   x86 boot needs it.
-- **Drop `0100` too** — rejected: `0100` (the ACPICA PCI_CONFIG skip) is a smaller,
-  still-required fix for the PCI-off path; only the `legacy_pic` half is dropped.
+- **Drop the ACPICA guard too** — rejected: a same-tree negative boot without it
+  reports `AE_BAD_PARAMETER` and probes no virtio device; only the `legacy_pic`
+  half is unnecessary.
 - **Squash TSI removal into a config-only change** — rejected: the patch series is
   the source of truth ([ADR 0007](0007-patch-management-policy.md)); dropping the
   capability means dropping the patches, the config symbol, and the gate together.

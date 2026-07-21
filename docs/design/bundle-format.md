@@ -33,7 +33,7 @@ flat-file packer and not carried.
 | **aarch64 raw Image — the kernel must sit at the start of guest RAM** — any other base manufactures a RAM-size boot floor (ADR 0004's probe: ≤ ~1 GiB VMs failed to map the kernel section) | hardcodes a base with no header read | `load_addr` = `entry_addr` = the consumer's DRAM base `0x40000000` + `text_offset` **read from the Image header** (bytes 8..16 le64, magic `0x644d5241` validated, base asserted 2 MiB-aligned — `Documentation/arch/arm64/booting.rst`) | bundle-golden (pack() fixture locks the address) + boot-smoke |
 | **riscv64 raw Image** | takes Image raw, hardcodes the base | `load_addr` = `entry_addr` = `0x80000000` (the QEMU-virt riscv DRAM base; carried target — [ADR 0004](../adr/0004-boot-contract-with-substrate.md)) | bundle-golden (pack() fixture) |
 | **Section alignment vs host page size** | 64 KiB (current packer); 4 KiB windows lived in the legacy C-blob packer | **64 KiB normally; 4 KiB for the windows variant**, recorded in the header `page_size` field so it is self-describing ([ADR 0003](../adr/0003-kernel-bundle-format.md)) | bundle-golden (offsets % `page_size` == 0) |
-| **Absent sections** — qboot/initrd are TEE-only | offset/size = 0 when absent | base/windows bundles set qboot/initrd offset+size to 0; substrate treats 0 as absent | bundle-golden |
+| **Reserved optional sections** — no current build supplies qboot/initrd | offset/size = 0 when absent | every supported bundle sets both pairs to zero; substrate treats zero as absent | bundle-golden |
 
 ## Our design
 
@@ -53,16 +53,18 @@ before the `u64` block align every address/offset to 8 bytes;
        pad to page_size
        kernel section (page-aligned size)
        pad to page_size
-       qboot section  (TEE only; absent ⇒ offset/size = 0)
+       qboot section  (reserved; absent ⇒ offset/size = 0)
        pad to page_size
-       initrd section (TEE only; absent ⇒ offset/size = 0)
+       initrd section (reserved; absent ⇒ offset/size = 0)
 ```
 
 **`pack-kernel` (the packer)** — `scripts/pack-kernel.py`, a faithful
 self-contained packer:
 
-- `--arch {x86_64,aarch64,riscv64} --variant {base,sev,tdx,windows}
+- `--arch {x86_64,aarch64,riscv64} --variant {base,debug,windows}
   --abi-version N --kernel <vmlinux|Image> [--qboot F] [--initrd I] --output <file>`.
+  The packer's internal v1 ID map still recognizes the removed `sev`/`tdx` IDs for
+  ABI compatibility, but the Makefile exposes no such build cells.
 - **x86_64:** parse the ELF, flatten PT_LOAD into a contiguous page-padded image
   (pad gaps, error on overlap), set `load_addr` = first PT_LOAD `p_vaddr & 0xFFFFFFF`
   and `entry_addr` = ELF `e_entry`.

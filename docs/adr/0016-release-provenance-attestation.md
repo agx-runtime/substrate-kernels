@@ -26,11 +26,13 @@ provenance predicate keyless, and GitHub stores the attestation
 
 ## Decision
 
-1. **Every release artifact is attested with SLSA build provenance.** The release
-   workflow's publish job runs `actions/attest-build-provenance` over the four
-   `.kernel` bundles and `SHA256SUMS` after checksumming and **before** the GitHub
-   Release is created, with `id-token: write` + `attestations: write` permissions.
-   Signing is keyless (GitHub OIDC → sigstore); no signing secrets exist.
+1. **Every release artifact is attested with SLSA build provenance.** The manually
+   dispatched workflow builds both supported kernel lines from one exact
+   repository commit. Its publish job runs `actions/attest-build-provenance` over
+   all eight `.kernel` bundles, the combined and per-version checksum manifests,
+   and `RELEASE-MANIFEST.json` after checksumming and **before** the GitHub Release
+   is created, with `id-token: write` + `attestations: write` permissions. Signing
+   is keyless (GitHub OIDC → sigstore); no signing secrets exist.
 
 2. **The primary verification path is GitHub's attestation store.**
 
@@ -42,10 +44,11 @@ provenance predicate keyless, and GitHub stores the attestation
    works for any artifact regardless of where it was downloaded from (GitHub
    Release or R2), because verification looks the artifact up by digest.
 
-3. **The attestation bundle is mirrored as an artifact.** The action's sigstore
-   bundle is attached to the GitHub Release and uploaded to R2 as
-   `linux-<version>-attestations.sigstore.jsonl` (version-scoped, like
-   `SHA256SUMS`), so an offline or GitHub-less verifier still has the material.
+3. **The attestation bundle is mirrored as an artifact.** The action's combined
+   sigstore bundle is attached to the commit-scoped GitHub Release as
+   `substrate-kernels-<12-char-commit>-attestations.sigstore.jsonl` and copied to
+   R2 once per kernel line as `linux-<version>-attestations.sigstore.jsonl`, so an
+   offline or GitHub-less verifier still has the material.
 
 4. **The R2 mirror is best-effort, like the rest of the R2 surface.** The
    attestation upload is gated on the Cloudflare credentials exactly as the bundle
@@ -68,10 +71,14 @@ provenance predicate keyless, and GitHub stores the attestation
   stronger, rebuild-based check.
 - The release workflow gains two permissions and two steps; no secrets, no key
   rotation, no signing infrastructure to operate.
-- Release assets and the R2 bucket each carry one extra small object per version.
-- The `v<version>-r<N>` re-release convention composes: each release run attests
-  the bytes it actually built, so a re-released version's attestation matches the
-  new bytes while the GitHub store retains history for the old digests.
+- Release identity is an exact repository commit and its generated
+  `build-<12-char-commit>` tag, while upstream versions remain artifact metadata.
+  This avoids forcing one of two independently pinned kernel lines into the
+  release name.
+- A release run attests the bytes it actually built. If a later commit retains an
+  upstream version but changes its bytes, commit-scoped GitHub Releases and the
+  GitHub attestation store retain history even though the same-named R2 alias is
+  replaced.
 
 ## Alternatives considered
 

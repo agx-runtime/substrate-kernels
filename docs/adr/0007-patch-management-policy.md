@@ -7,12 +7,11 @@
 
 ## Context
 
-substrate-kernels needs source changes the kernel `.config` cannot express: orderly
-shutdown when the guest entrypoint exits, vsock datagram support, the x86 ACPI
-PCI_CONFIG fix, and others ([design/patches.md](../design/patches.md)). (TSI and the
-x86 `legacy_pic` fix were once carried but were dropped —
-[ADR 0015](0015-drop-tsi-and-x86-acpi-legacy-pic.md).) The
-reference accumulated ~36 such patches. We must decide **how** these are
+substrate-kernels needs three source changes the kernel `.config` cannot express:
+an x86 ACPICA/`CONFIG_PCI=n` fix, one virtio-fs bug fix, and reproducible BTF
+generation ([design/patches.md](../design/patches.md)). The
+old reference accumulated more than 30 base and TEE patches, most without a live
+substrate consumer. We must decide **how** the surviving changes are
 managed — because a patch series is simultaneously the highest-leverage and
 highest-risk surface in the repo (CLAUDE.md §6): a bad patch is a guest that
 miscomputes, a boot that hangs, or a host-inherited security regression — and
@@ -22,7 +21,8 @@ because every patch is a standing cost re-validated at each version bump (ADR
 ## Decision
 
 1. **An ordered patch series against the pin, not a fork.** We check in
-   `patches/NNNN-title.patch` (a numbered, ordered series) and the pin (ADR 0001),
+   `patches/<line>/NNNN-title.patch` (a numbered, ordered series per exact LTS
+   tree) and the pins (ADR 0001),
    never a forked kernel tree. The build reconstructs the patched tree as
    `pin + series`; the series is the source of truth, the tree is derived.
 
@@ -51,12 +51,13 @@ because every patch is a standing cost re-validated at each version bump (ADR
    commit; an original change is re-derived against our tree with a substrate-native
    title. Carrying a patch verbatim with a foreign-project title is a bug.
 
-7. **A version bump re-validates the whole series** (ADR 0001). Bumping the pin
+7. **A version bump re-validates that line's whole series** (ADR 0001). Bumping a pin
    re-applies every patch at `-p1`; any that no longer applies clean is re-derived.
    The series is kept small precisely so this cost stays bounded.
 
-8. **TEE patches are a separate, quarantined series** (ADR 0009): `patches-tee/`,
-   applied only for the sev/tdx variants, never in a base build.
+8. **No aspirational patch sets.** A deferred device or machine model does not
+   justify carrying guest-kernel deltas. The old TEE series was removed with its
+   unwired variants; it can return only with a substrate machine model and tests.
 
 ## Consequences
 
@@ -69,8 +70,9 @@ because every patch is a standing cost re-validated at each version bump (ADR
   real maintenance cost — minimal, so version bumps stay cheap.
 - The keep/drop rationale per patch ([design/patches.md](../design/patches.md))
   means a patch with no live justification gets dropped, not carried by inertia.
-- TEE quarantine guarantees a base build's source surface never includes
-  confidential-compute changes (ADR 0008/0009).
+- Version-specific directories preserve the zero-offset rule across two LTS
+  trees; sharing a patch merely because the semantic change is shared is not
+  allowed when its source context differs.
 
 ## Alternatives considered
 

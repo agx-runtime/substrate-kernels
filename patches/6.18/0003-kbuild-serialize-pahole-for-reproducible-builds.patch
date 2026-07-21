@@ -1,0 +1,37 @@
+From f67a37205241bb0acf033a9543fd8608d9b7ef28 Mon Sep 17 00:00:00 2001
+From: substrate <substrate-kernels@agx.so>
+Date: Mon, 20 Jul 2026 18:24:27 -0700
+Subject: [PATCH 3/3] kbuild: serialize pahole for reproducible builds
+
+Parallel pahole assigns BTF type IDs nondeterministically. KBUILD_BUILD_TIMESTAMP is fixed for substrate-kernels reproducible builds, so omit pahole -j in that mode while retaining parallel BTF generation for ordinary builds. Based on the upstream proposal at https://lore.kernel.org/lkml/20240306060818.9355-2-lukas.bulwahn@gmail.com/.
+---
+ scripts/Makefile.btf | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/scripts/Makefile.btf b/scripts/Makefile.btf
+index db76335dd..4f6a0e172 100644
+--- a/scripts/Makefile.btf
++++ b/scripts/Makefile.btf
+@@ -14,14 +14,19 @@ endif
+ 
+ pahole-flags-$(call test-ge, $(pahole-ver), 121)	+= --btf_gen_floats
+ 
++ifndef KBUILD_BUILD_TIMESTAMP
+ pahole-flags-$(call test-ge, $(pahole-ver), 122)	+= -j$(JOBS)
++endif
+ 
+ pahole-flags-$(call test-ge, $(pahole-ver), 125)	+= --skip_encoding_btf_inconsistent_proto --btf_gen_optimized
+ 
+ else
+ 
+ # Switch to using --btf_features for v1.26 and later.
+-pahole-flags-$(call test-ge, $(pahole-ver), 126)  = -j$(JOBS) --btf_features=encode_force,var,float,enum64,decl_tag,type_tag,optimized_func,consistent_func,decl_tag_kfuncs
++pahole-flags-$(call test-ge, $(pahole-ver), 126)  = --btf_features=encode_force,var,float,enum64,decl_tag,type_tag,optimized_func,consistent_func,decl_tag_kfuncs
++ifndef KBUILD_BUILD_TIMESTAMP
++pahole-flags-$(call test-ge, $(pahole-ver), 126) += -j$(JOBS)
++endif
+ 
+ pahole-flags-$(call test-ge, $(pahole-ver), 130) += --btf_features=attributes
+ 
+-- 
+2.50.1 (Apple Git-155)

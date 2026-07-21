@@ -1,0 +1,31 @@
+From d3174eae19676682dcf2970eea1ff360400e72f0 Mon Sep 17 00:00:00 2001
+From: substrate <substrate-kernels@agx.so>
+Date: Mon, 20 Jul 2026 18:24:27 -0700
+Subject: [PATCH 2/3] ACPICA: skip the PCI_CONFIG handler when PCI is disabled
+
+Substrate enumerates x86 virtio-mmio devices and VMGENID through ACPI while its minimal guest config sets CONFIG_PCI=n. ACPICA otherwise tries to install a handler whose switch arm was compiled out and aborts ACPI initialization with AE_BAD_PARAMETER.
+
+Keep the default-space table unchanged, but skip its PCI_CONFIG entry at handler-install time when ACPI_PCI_CONFIGURED is absent. The remaining System Memory, System I/O, and Data Table handlers are installed normally.
+---
+ drivers/acpi/acpica/evhandler.c | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/drivers/acpi/acpica/evhandler.c b/drivers/acpi/acpica/evhandler.c
+index 1c8cb6d92..f6bb04cb8 100644
+--- a/drivers/acpi/acpica/evhandler.c
++++ b/drivers/acpi/acpica/evhandler.c
+@@ -74,6 +74,12 @@ acpi_status acpi_ev_install_region_handlers(void)
+ 	 * Similar for AE_SAME_HANDLER.
+ 	 */
+ 	for (i = 0; i < ACPI_NUM_DEFAULT_SPACES; i++) {
++#ifndef ACPI_PCI_CONFIGURED
++		/* The PCI_CONFIG handler is compiled out with CONFIG_PCI=n. */
++		if (acpi_gbl_default_address_spaces[i] ==
++		    ACPI_ADR_SPACE_PCI_CONFIG)
++			continue;
++#endif
+ 		status = acpi_ev_install_space_handler(acpi_gbl_root_node,
+ 						       acpi_gbl_default_address_spaces
+ 						       [i],
+-- 
+2.50.1 (Apple Git-155)

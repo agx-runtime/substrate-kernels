@@ -1,52 +1,29 @@
-# Design: the initramfs
+# Design: initramfs and root filesystem
 
-What the guest runs before the rootfs is available, and how (and whether) it is
-packed into the bundle. The story differs by variant: a **base** bundle carries no
-initramfs — substrate supplies the boot filesystem (an ext4 disk) at run time —
-while a **TEE** bundle vendors the prebuilt secret-retrieval initrd
-blob (TEE wiring is deferred — [ADR 0009](../adr/0009-confidential-compute-variants.md)).
+Current release bundles contain a kernel only. Their optional qboot and initrd
+header ranges are zero. substrate supplies userspace at VM creation time instead
+of coupling it to a kernel release.
 
-## Background
+## Current paths
 
-The TEE `initrd/` (a small gzip cpio with a minimal init) is bundled only
-for the TEE variants via the packer's `--initrd`; the base variant ships no baked
-initrd and relies on the VMM to supply the boot filesystem. The bundle header
-carries `initrd_offset`/`initrd_size` (zero when absent).
+- The production root filesystem is an ext4 disk exposed through virtio-blk.
+  virtio-fs is reserved for optional volume mounts and is never the root device.
+- substrate may construct and supply a per-VM initramfs, for example to place
+  `init.substrate` and configuration in early userspace before pivoting to ext4.
+- `CONFIG_BLK_DEV_INITRD=y` keeps that runtime path available even though the
+  `.kernel` bundle itself has no baked initrd.
+- The `SUBK` format and packer retain optional qboot/initrd fields for format
+  compatibility, but no current Makefile variant populates them.
 
-## Subtle details & gotchas
-
-| Detail | Convention | Our handling | Gate |
-|---|---|---|---|
-| **Base rootfs comes from the VMM, not the bundle** | base bundles ship no initrd | base bundle `initrd_offset/size = 0`; substrate supplies a sparse ext4 disk as rootfs via virtio-blk at run time (base enables `BLK_DEV_INITRD` so the kernel keeps the initrd boot path available, but ships none baked; CLAUDE.md §5b — never virtiofs as rootfs) | boot-smoke (base) |
-| **TEE needs early userspace before rootfs** — secrets/measurement must happen inside the encrypted domain before trusting a disk | bundles a prebuilt initrd blob into the bundle | TEE bundle vendors the prebuilt secret-retrieval initrd; packed via the bundle's initrd section ([ADR 0009](../adr/0009-confidential-compute-variants.md)) | TEE attestation/boot check |
-| **A vendored initrd blob is reproducibility-sensitive** — it must be pinned, not regenerated | ships a prebuilt blob | the TEE initrd is the prebuilt blob, **vendored + pinned by sha256** (not built by us — it ships prebuilt with no source), so the bundle stays byte-reproducible ([ADR 0005](../adr/0005-build-environment-and-reproducibility.md)) | `make repro-check` (TEE) |
-
-## Our design
-
-- **Base variant — no baked initramfs.** The bundle's initrd section is absent
-  (`offset/size = 0`). substrate provides the boot filesystem at run time: a
-  **sparse ext4 disk from the OCI pipeline** mounted as rootfs via virtio-blk. The
-  base config enables `EXT4_FS` and also enables `BLK_DEV_INITRD` so the kernel
-  keeps the initrd boot path available (the bundle ships none baked, but substrate
-  can hand the guest one at run time — [kernel-config.md](kernel-config.md)). This
-  keeps the bundle small and lets substrate own the rootfs supply chain (CoW /
-  dirty tracking / snapshot chains — substrate architecture.md §1).
-- **TEE variants — a vendored prebuilt initrd.** The sev/tdx bundles carry a small
-  initrd whose init runs *inside* the encrypted/attested domain to retrieve secrets
-  and complete measurement before any external disk is trusted. It ships
-  this initrd as a prebuilt blob (no source); we **vendor that blob, pinned by
-  sha256**, and pack it into the bundle's initrd section. The TEE configs enable
-  `BLK_DEV_INITRD`. TEE wiring (and thus the actual blob vendoring) is deferred
-  ([ADR 0009](../adr/0009-confidential-compute-variants.md)).
-- **The boot handoff is substrate's.** Whichever path supplies userspace, control
-  reaches the substrate guest supervisor; the kernel's orderly-init-death behavior
-  ([patches.md](patches.md)) ensures that supervisor exiting cleanly shuts the VM
-  down rather than panicking.
+The removed SEV/TDX variants had planned prebuilt firmware and secret-retrieval
+initrds, but those assets were never wired into releasable bundles and substrate
+has no corresponding confidential-compute machine model. They are not a current
+initramfs path ([ADR 0009](../adr/0009-confidential-compute-variants.md)).
 
 ## Verification
 
-boot-smoke ([testing/boot-smoke.md](../testing/boot-smoke.md)) covers the base path
-(substrate supplies an ext4 disk / initramfs and the guest reaches userspace);
-`make repro-check` covers the TEE initramfs's deterministic build; the TEE
-variants' attestation/measurement is verified on their own (separate) lane
-([ADR 0009](../adr/0009-confidential-compute-variants.md)).
+The bundle golden asserts absent optional sections are encoded as zero ranges.
+Substrate KVM smokes boot both the ext4-root path and a runtime-supplied
+`init.substrate` initramfs, reach userspace, pivot to the block root, and shut down
+cleanly. The initramfs bytes are a substrate VM input, not a hidden input to kernel
+bundle reproducibility.

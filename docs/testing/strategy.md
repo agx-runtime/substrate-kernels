@@ -23,18 +23,19 @@ and §8 (verification).
 
 - **Source pin** ([ADR 0001](../adr/0001-kernel-source-pin-and-update-lifecycle.md)) —
   the sha256 check is the gate; the pin-drift lane surfaces newer point releases
-  for opt-in. *How:* fetch, hash, compare to `scripts/kernel-pin.env`. *Why:* the
+  for opt-in. *How:* fetch, hash, compare to the selected
+  `scripts/kernel-pins/<line>.env`. *Why:* the
   root of reproducibility. *What if it fails:* hard stop before extract.
 - **Patch series** ([patches.md](../design/patches.md),
   [ADR 0007](../adr/0007-patch-management-policy.md)) — applies-clean. *How:* apply
-  `patches/` (and `patches-tee/` for sev/tdx) at `-p1`, fail on any fuzz/offset.
+  `patches/<line>/` at `-p1`, fail on any fuzz or offset.
   *Why:* fuzz means a possibly-misplaced hunk → a subtly wrong guest. *What if it
   fails:* re-derive the patch, never force.
 - **Kernel config** ([kernel-config.md](../design/kernel-config.md),
   [ADR 0006](../adr/0006-kernel-config-strategy.md)) — config-invariant. *How:* after
   `olddefconfig`, assert a required-present set and a forbidden-absent set per
-  (arch, variant), including the exact `NR_CPUS` and "base forbids TEE"
-  ([ADR 0009](../adr/0009-confidential-compute-variants.md)). *Why:* `olddefconfig`
+  (line, arch, variant), including exact `NR_CPUS` and the forbidden unsupported
+  devices/TEE surface. *Why:* `olddefconfig`
   silently resolves changed deps. *What if it fails:* the config or a dependency
   changed — fix the config, don't relax the gate.
 - **Packer / bundle** ([bundle-format.md](../design/bundle-format.md),
@@ -46,14 +47,18 @@ and §8 (verification).
   sides + the golden.
 - **Reproducibility** ([reproducibility.md](../design/reproducibility.md),
   [ADR 0005](../adr/0005-build-environment-and-reproducibility.md)) — `make
-  repro-check`. *How:* rebuild in the pinned container, compare to a committed
-  digest; run cross-host (macOS container vs Linux). *Why:* CLAUDE.md §3. *What if
+  repro-check`. *How:* perform two clean builds in the pinned container and
+  compare their bytes; run cross-host when the toolchain changes. *Why:* CLAUDE.md
+  §3. *What if
   it fails:* a toolchain/source/metadata input drifted — root-cause it.
 - **Boot contract / runtime** ([ADR 0004](../adr/0004-boot-contract-with-substrate.md))
-  — boot-smoke ([boot-smoke.md](boot-smoke.md)). *How:* substrate loads the bundle
-  and boots a guest on KVM + HVF. *Why:* the only proof the addresses, config, and
-  patches actually run. *What if it fails:* the boot contract, the config, or a
-  patch is wrong — read the guest console, root-cause.
+  — boot-smoke ([boot-smoke.md](boot-smoke.md)). *How:* substrate loads each bundle
+  on real KVM hosts (AMD and Intel x86 plus Arm), checks ACPI/FDT device probe,
+  records the declined experimental DGRAM bit, performs a 128 KiB stream-vsock
+  transfer, reaches userspace, validates exact workload status and clean supervisor
+  shutdown, and reads the PL031 clock on arm64. *Why:* a compile
+  cannot prove that a behavioral patch or VMM contract works. *What if it fails:*
+  read the guest console and device observations and root-cause it.
 
 ## Budgets (review signals, not hard gates)
 
@@ -61,15 +66,17 @@ and §8 (verification).
   size per (arch, variant). A jump at a version bump or a new `CONFIG_*` is
   surfaced for review (architecture.md §6).
 - **Boot-to-userspace time** — measured in boot-smoke; the no-modules/virtio-only
-  config and orderly-init patches serve it. A regression is a review signal.
+  config and the `init.substrate` supervisor serve it. A regression is a review
+  signal.
 
 ## Platform matrix
 
 - **Input + artifact gates** (sha256, applies-clean, config-invariant,
   bundle-golden, repro-check) are **host-independent** — they run in the pinned
   Linux container on any dev host or CI runner.
-- **boot-smoke** needs a real hypervisor: KVM (Linux, x86_64 + aarch64) and HVF
-  (macOS, aarch64). It uses substrate as the loader and consumes the produced
+- **boot-smoke** needs a real hypervisor: the release gate uses KVM on AMD and
+  Intel x86_64 and on aarch64; HVF remains a substrate compatibility lane. It
+  uses substrate as the loader and consumes the produced
   `.kernel`. Fixtures (a substrate build + a rootfs disk/initramfs) are staged, not
   rebuilt per run; a missing fixture is a `panic!("[fixture] … — run make …")`,
   never a skip (CLAUDE.md §9).

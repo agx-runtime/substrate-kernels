@@ -27,10 +27,11 @@ how config relates to the patch series (CLAUDE.md §1: prefer config over patch)
    self-contained; module loading adds boot-time, an initramfs dependency, and a
    surface we don't want. Every needed driver is built in (`=y`).
 
-3. **Virtio-only device model.** The enabled device drivers are exactly substrate's
-   set: virtio block, net, vsock, console, rng, and virtio-fs/DAX (substrate's
-   optional `--volume` mounts), plus virtio-rtc. (Kernel-side TSI was in this set but
-   has since been dropped — [ADR 0015](0015-drop-tsi-and-x86-acpi-legacy-pic.md).)
+3. **Virtio-mmio device model.** The enabled device drivers match substrate's set:
+   virtio block, net, vsock, console, rng, balloon, and non-DAX virtio-fs for
+   optional `--volume` mounts. arm64 also carries PL031; x86 carries ACPICA for the
+   AML-described virtio-mmio devices. DAX, virtio-RTC, TSI, PCI, and TEE support are
+   disabled because substrate does not expose those contracts.
    Non-virtio device classes a microVM never sees — USB, sound, most of PCI, framebuffer/DRM —
    are disabled. (GPU/DRM is cut outright, CLAUDE.md §1.)
 
@@ -40,11 +41,11 @@ how config relates to the patch series (CLAUDE.md §1: prefer config over patch)
    (CLAUDE.md §5).
 
 5. **One full `.config` per (arch, variant).** `config-<variant>_<arch>` for each
-   cell of the matrix (ADR 0002, ADR 0009). They are full configs (not fragments
+   supported cell of the matrix (ADR 0002). They are full configs (not fragments
    layered at build time) so the build is a simple copy + `olddefconfig`, and the
    **deltas between them are documented** in
    [design/kernel-config.md](../design/kernel-config.md) so a reader sees exactly
-   what sev/tdx or an architecture adds.
+   what debug/windows or an architecture adds.
 
 6. **Reproducibility-hostile options are disabled.** Embedded build IDs and
    timestamps are turned off in config wherever possible, complementing the fixed

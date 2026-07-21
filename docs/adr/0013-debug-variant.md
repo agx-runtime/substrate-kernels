@@ -81,10 +81,12 @@ This ADR records the second path.
    carry `(arch, variant)` cells for both `base` and `debug` on x86_64 and
    aarch64. `applies-clean` is the same patch series so it isn't duplicated.
 
-6. **release.yml publishes the debug bundles alongside base.** A release
-   carries four `.kernel` artifacts (`linux-<version>-{base,debug}-{x86_64,aarch64}.kernel`)
-   in the GitHub Release, in the version-scoped `SHA256SUMS`, and to the R2
-   bucket served at `kernels.substrate.so` /
+6. **release.yml publishes the debug bundles alongside base.** Each kernel line
+   contributes four `.kernel` artifacts
+   (`linux-<version>-{base,debug}-{x86_64,aarch64}.kernel`), so the atomic
+   two-line GitHub Release contains eight. Each line also has a version-scoped
+   `SHA256SUMS`, and all bundles are mirrored to the R2 bucket served at
+   `kernels.substrate.so` /
    `kernels.agx.so`. The download proxy ([ADR 0011](0011-download-proxy-with-analytics.md)) routes
    the new filenames unchanged — its variant regex already accepted `[a-z]+`.
 

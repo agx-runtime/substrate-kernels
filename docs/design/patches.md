@@ -1,187 +1,98 @@
 # Design: the patch series
 
-The ordered, justified source deltas applied to the pinned tree
-([ADR 0007](../adr/0007-patch-management-policy.md)). This is the highest-leverage
-and highest-risk surface in the repo (CLAUDE.md §6): each patch is a guest-kernel
-divergence that must earn its place against a substrate feature, a boot/hardware
-contract, or a guest-correctness bug. This doc groups the carried series by theme
-with the *why* for each, and records the explicit keep/drop decisions.
+Linux is patched only where the current substrate VMM contract requires behavior
+that the pinned upstream kernel does not provide. Each supported LTS line has an
+independently re-derived series in `patches/<line>/`; sharing patches between
+different source trees would hide drift as offsets or fuzz.
 
-> **Provenance note.** Exact upstream commit hashes are pinned when each patch is
-> re-derived against our tree (CLAUDE.md §6 — re-derive, don't paste). Below,
-> "backport" means the change exists upstream and we cite the mainline commit at
-> re-derivation; "original" means a downstream change we author against a cited
-> contract and write to be upstreamable in spirit.
+The 6.12.96/6.18.39 audit reduced the inherited stack from 30 base patches plus
+4 deferred TEE patches to **3 patches per line**. The two directories contain the
+same logical changes, but each patch applies at zero fuzz and zero offset to its
+own pin.
 
-## Background
+## Current series
 
-The carried series, by theme: orderly
-init-death; the vsock datagram series + its nonlinear-SKB reverts; the arm64
-memory-model/TSO series; virtio-GPU (cut); input-compat; DAX/FUSE/overlayfs;
-virtio-CAN (flagged); virtio-RTC; the x86 ACPI PCI_CONFIG fix; and the SEV/TDX
-series (quarantined, [ADR 0009](../adr/0009-confidential-compute-variants.md)).
-TSI and the x86 ACPI `legacy_pic` fix were **dropped** to trim the downstream
-maintenance surface ([ADR 0015](../adr/0015-drop-tsi-and-x86-acpi-legacy-pic.md)).
-
-## Carried themes
-
-### Orderly shutdown when the guest entrypoint exits
-- **What:** when PID 1 (the guest entrypoint) exits, trigger an orderly reboot
-  instead of a kernel panic; suppress the custom-reboot-command path that a microVM
-  cannot service.
-- **Why (contract):** in a substrate microVM the guest entrypoint runs as PID 1;
-  its exit should cleanly shut the VM down, not panic the kernel (which a VMM then
-  has to detect as a crash). Touches `kernel/exit.c`, `kernel/reboot.c`
-  (`orderly_reboot` semantics).
-- **Provenance:** original (downstream microVM behavior); cite the reboot/exit
-  contract.
-
-### vsock datagrams (+ nonlinear-SKB reverts)
-- **What:** multi-transport datagram support over vsock — the
-  `VIRTIO_VSOCK_F_DGRAM` feature bit and the generalized recv/transport-lookup
-  paths — plus reverts of recent nonlinear-SKB-allocation changes that regress in
-  this environment.
-- **Why (contract):** broadens what substrate's vsock muxer (substrate ADR 0015)
-  can carry beyond streams. Touches `net/vmw_vsock/af_vsock.c`,
-  `virtio_transport_common.c`, `include/uapi/linux/virtio_vsock.h`. Spec:
-  virtio-vsock (Virtio 1.2 §5.10) + the `F_DGRAM` extension.
-- **Provenance:** backport (the upstream datagram series + the specific reverts);
-  cite each at re-derivation. **Audit obligation:** confirm the reverts are still
-  needed against our pin (a revert that the pin already lacks is dropped).
-- **Audit (6.12.91 pin):** upstream reworked the RX-capture path — it removed
-  `virtio_transport_copy_nonlinear_skb()` and made `virtio_transport_build_skb()`
-  copy the payload unconditionally via `skb_copy_datagram_iter()`, added
-  `VIRTIO_VSOCK_SKB_CB(skb)->offset` accounting to the stream dequeue, and reordered
-  the `af_vsock.c` buffer-size clamp (min before max). The datagram-send patch was
-  re-anchored (its `virtio_transport_sock_alloc_send_skb()` helper had used the
-  now-deleted `copy_nonlinear_skb` as context); the change is otherwise identical.
-  The reverts were **kept**: each still removes real upstream code (so none is
-  moot), the linear-SKB requirement of the vsock path is unchanged, and the rework
-  lives in functions orthogonal to the revert targets (`fill_skb`/`alloc_skb` TX,
-  `vhost_vsock_alloc_skb` RX, the seqpacket/credit logic).
-
-### TSI (transparent socket interception) — dropped
-- Previously two patches — a `net/tsi/` address-family driver plus a `CONFIG_TSI`
-  symbol, and the opt-in socket-hijack path — that routed guest
-  `AF_INET`/`AF_INET6`/`AF_UNIX` sockets transparently over vsock to a host proxy.
-- **Dropped** ([ADR 0015](../adr/0015-drop-tsi-and-x86-acpi-legacy-pic.md)): it was
-  the largest single downstream source addition (touching `net/socket.c`,
-  `security/selinux/`), a standing per-pin-bump maintenance + source-audit cost.
-  `CONFIG_TSI` is removed from every config and from the config-invariant gate.
-  Re-add via a new ADR if a substrate consumer reappears.
-
-### arm64 memory model / TSO control
-- **What:** `prctl(PR_{SET,GET}_MEM_MODEL)` with a TSO mode, the `ACTLR_EL1`
-  thread-state scaffolding, and the Apple-IMPDEF TSO control.
-- **Why (contract):** lets guest userspace that emulates x86 (which assumes Total
-  Store Order) request TSO on a weakly-ordered aarch64 guest — relevant when the
-  substrate guest runs x86 binaries under emulation on Apple Silicon. Guest-internal
-  (a `prctl` + register state); **no host device**, so it is inert if unused
-  ([ADR 0008](../adr/0008-kernel-capability-surface-vs-vmm-scope.md)). Touches
-  `arch/arm64/`, `kernel/sys.c`, `include/uapi/linux/prctl.h`. Spec: the ARM ARM
-  (memory ordering) + Apple IMPDEF.
-- **Provenance:** backport (the upstream/Asahi memory-model series); aarch64-only.
-
-### virtio-fs / DAX + overlayfs robustness
-- **What:** allow DAX block size ≥ `PAGE_SIZE`; mark FUSE DAX inode releases as
-  blocking; handle `EOPNOTSUPP` in overlayfs fileattr copy-up; fix a virtio-fs
-  use-after-free on a setup-failure path.
-- **Why (contract):** substrate keeps virtio-fs for **optional `--volume` bind
-  mounts** (never rootfs — substrate architecture.md §1; CLAUDE.md §5b). These
-  patches make virtio-fs/DAX correct and stable under mixed page sizes and error
-  paths. Touches `fs/dax.c`, `fs/fuse/`, `fs/overlayfs/`. Spec: the FUSE/DAX and
-  overlayfs semantics.
-- **Provenance:** mix of backports (DAX/overlayfs fixes) and a downstream bug fix
-  (the virtio-fs UAF); cite each.
-
-### virtio-rtc (timekeeping)
-- **What:** the virtio-rtc driver core, its PTP clock, the arm Generic-Timer
-  cross-timestamping, and the RTC-class exposure.
-- **Why (contract):** accurate guest timekeeping / host clock sync; part of the
-  kernel's fixed feature set so substrate may wire it
-  ([ADR 0008](../adr/0008-kernel-capability-surface-vs-vmm-scope.md)). Touches
-  `drivers/virtio/virtio_rtc_*`. Spec: the virtio-rtc device spec + PTP.
-- **Provenance:** backport (the upstream virtio-rtc series).
-
-### x86 ACPI PCI_CONFIG fix
-- **What:** skip the ACPICA PCI_CONFIG address-space handler when `CONFIG_PCI=n`.
-- **Why (contract):** the minimal config disables PCI
-  ([kernel-config.md](kernel-config.md)), but x86 ACPI init assumes a PCI_CONFIG
-  handler; without this fix ACPI init fails on the 64-bit direct-boot x86 path
-  ([ADR 0004](../adr/0004-boot-contract-with-substrate.md)). Touches
-  `drivers/acpi/acpica/evhandler.c`. Spec: ACPI + the x86 boot path.
-- **Provenance:** original (downstream hypervisor-boot fix); x86-only.
-- **Note:** the companion `legacy_pic`-under-HW_REDUCED patch (`0101`) was
-  **dropped** ([ADR 0015](../adr/0015-drop-tsi-and-x86-acpi-legacy-pic.md)), which
-  leaves a latent x86-boot risk on substrate's HW_REDUCED ACPI path — not caught by
-  the interim QEMU boot-smoke ([boot-smoke.md](../testing/boot-smoke.md)).
-
-### General syscall / mm fixes
-- **What:** allow 64-bit processes to use compat input syscalls; fix the
-  `__wp_page_copy_user` fallback for a remote `mm_struct`.
-- **Why (contract):** general guest-correctness fixes we carry that
-  apply regardless of device wiring (the mm fix also matters under large pages).
-  Touches `drivers/input/input-compat.c`, `mm/memory.c`.
-- **Provenance:** backport; cite each. **Keep only if still needed** against the
-  pin (a fix already upstream in our pin is dropped).
-
-### kbuild: skip pahole `-j` when `KBUILD_BUILD_TIMESTAMP` is set (reproducibility)
-- **What:** wrap the `pahole-flags-y += -j` line in `scripts/Makefile.btf` (and
-  the pahole-1.26+ branch) in `ifndef KBUILD_BUILD_TIMESTAMP` so the `-j`
-  multithreading flag is dropped from BTF generation when the kernel is built
-  reproducibly.
-- **Why (contract):** pahole's parallel BTF generation produces
-  non-deterministic type_id allocation. The IDs land in the `.BTF` /
-  `.BTF_ids` ELF sections of vmlinux, so two identical builds of the **debug**
-  variant produce bundles differing by ~2.9 M bytes in the BTF region —
-  defeating `make repro-check` (CLAUDE.md §3 / [ADR 0005](../adr/0005-build-environment-and-reproducibility.md)).
-  Base doesn't carry `CONFIG_DEBUG_INFO_BTF=y` so it was unaffected; aarch64
-  debug happens to be deterministic at lower BTF type counts but x86 isn't.
-- **Provenance:** backport of an upstream proposal
-  ([LKML 2024-03 — "kbuild: disable pahole multi-threading on reproducible builds"](https://lore.kernel.org/lkml/20240306060818.9355-2-lukas.bulwahn@gmail.com/)).
-  Drop when an upstream fix lands in the pinned tree.
-
-## Keep / drop / flag decisions
-
-| Area | Decision | Rationale |
+| Patch | Keep reason | Removal condition |
 |---|---|---|
-| Orderly init-death | **keep** | core microVM behavior (substrate guest entrypoint = PID 1) |
-| vsock datagrams + SKB reverts | **keep** | broadens substrate's vsock muxer; reverts re-validated against the pin |
-| TSI | **drop** | largest downstream original patch; trimmed to cut per-pin-bump maintenance ([ADR 0015](../adr/0015-drop-tsi-and-x86-acpi-legacy-pic.md)) |
-| arm64 TSO / memory model | **keep** | x86-emulation guests on Apple Silicon; inert if unused (ADR 0008) |
-| virtio-fs / DAX + overlayfs | **keep** | substrate's optional `--volume` mounts (architecture.md §1) |
-| virtio-rtc | **keep** | guest timekeeping; part of the fixed feature set |
-| x86 ACPI PCI_CONFIG fix (0100) | **keep** | required for the 64-bit direct-boot x86 path with PCI off |
-| x86 ACPI `legacy_pic` fix (0101) | **drop** | trimmed; latent HW_REDUCED-boot risk, recorded ([ADR 0015](../adr/0015-drop-tsi-and-x86-acpi-legacy-pic.md)) |
-| general syscall/mm fixes | **keep** (conditional) | guest-correctness; drop any already in the pin |
-| kbuild pahole-no-`-j` | **keep** | required for debug-variant repro-check; drop when upstream adopts the LKML fix |
-| **virtio-GPU / virtgpu** | **drop** | GPU is cut (CLAUDE.md §1; user: "just not GPUs") |
-| **virtio-CAN** | **drop** | outside substrate's device set and not requested; carried only if a concrete substrate consumer appears (would need an ADR) |
-| **TEE / SEV / TDX series** | **quarantine** | out of base; opt-in variant only ([ADR 0009](../adr/0009-confidential-compute-variants.md)) |
+| `0001` virtio-fs queue cleanup | Backport of upstream Linux commit [`6af3330ec5d5`](https://github.com/torvalds/linux/commit/6af3330ec5d5fb8c06c04eb520a71cf73ea5a765): a failed virtqueue setup otherwise leaves freed pointers live and can double-free them during final release. substrate exposes virtio-fs, so the probe path is reachable. | Drop from a line once its pin contains the upstream fix. |
+| `0002` ACPICA without PCI | x86 substrate supplies ACPI tables while the deliberately small guest config has `CONFIG_PCI=n`. ACPICA otherwise attempts to install its compiled-out PCI configuration-space handler, returns `AE_BAD_PARAMETER`, and aborts the default ACPI handler setup. | Prefer an upstream fix. Replacing it with `CONFIG_PCI=y` is acceptable only after substrate boot tests on AMD and Intel show equivalent behavior and the added kernel surface/size is accepted. |
+| `0003` deterministic pahole | Pinned pahole 1.24 assigns BTF type IDs nondeterministically with parallel encoding, making debug bundles differ between identical builds. The patch serializes only BTF generation when reproducible build metadata is in use. | Drop when the pinned kernel/toolchain has an equivalent deterministic implementation and the stock A/B reproducibility gate passes. |
 
-The one **open decision** is virtio-CAN: it is neither GPU (so not explicitly cut)
-nor in substrate's device set (so not justified). Default is drop; revisit only
-with a named substrate consumer.
+### Why ACPICA is required
 
-## Our design
+ACPICA is the kernel's implementation of ACPI: it parses and executes the AML in
+firmware-provided tables such as the DSDT. On substrate's x86 machine it is not a
+PCI dependency. It is how Linux discovers the VMM's ACPI-described virtio-mmio
+devices and VM generation ID and applies the rest of the x86 firmware contract.
 
-- `patches/NNNN-title.patch` — the ordered base series, grouped by the themes
-  above, each with a why-header (intent + provenance + citation) and applying at
-  `-p1` with zero fuzz ([ADR 0007](../adr/0007-patch-management-policy.md)).
-- `patches-tee/NNNN-title.patch` — the quarantined TEE series, applied only for
-  sev/tdx ([ADR 0009](../adr/0009-confidential-compute-variants.md)).
-- Carried capabilities are part of the kernel's fixed per-variant feature set; the
-  bundle header carries no capability advertisement ([ADR 0008](../adr/0008-kernel-capability-surface-vs-vmm-scope.md)).
-- Numbering leaves gaps between themes so a backport can slot in without renumbering
-  the world; order within a theme respects dependencies (e.g. the vsock feature bit
-  before its implementation).
+The retained patch does **not** remove or bypass ACPICA. It only omits ACPICA's
+default `PCI_CONFIG` address-space handler when Linux was built without PCI. The
+System Memory, System I/O, and Data Table handlers remain. arm64 discovers devices
+through its flattened device tree and does not exercise this x86-only path.
 
-## Verification
+A same-tree A/B boot on AMD proves the guard is behavioral, not cosmetic. With
+only this six-line patch reversed, Linux reports `AE_BAD_PARAMETER` during ACPI
+region initialization, substrate observes zero virtio-vsock MMIO accesses, and
+the driver never reaches `DRIVER_OK`. Restoring it enables the ACPI interpreter
+and the DSDT-enumerated virtio devices probe on both AMD and Intel.
 
-The applies-clean gate (zero fuzz against the pin); the config-invariant gate
-(each patch's `CONFIG_*` present); boot-smoke
-([testing/boot-smoke.md](../testing/boot-smoke.md)) exercises each kept capability
-as substrate wires the matching device (orderly-shutdown observed as a clean VM
-exit; vsock/virtio-fs/rtc as working devices; the x86 ACPI PCI_CONFIG fix as a
-successful x86 boot). A version bump re-runs the whole series through applies-clean
-and re-validates the conditional keeps ([ADR 0001](../adr/0001-kernel-source-pin-and-update-lifecycle.md)).
+### Why the datagram RFC was dropped
+
+The six inherited datagram patches came from the unmerged
+[`[PATCH RFC net-next v4 0/8] virtio/vsock: support datagrams`](https://lore.kernel.org/netdev/20230413-b4-vsock-dgram-v4-0-0cebbb2ae899@bytedance.com/)
+series. substrate still exposes a public datagram seam and advertises feature bit
+3, but its shipped real backends and guest control paths use streams; only the
+simulator and tests implement a datagram backend. QEMU has no matching
+virtio-vsock feature, while Firecracker explicitly resets datagram packets.
+That is not a production consumer and does not justify six downstream RFC patches.
+
+Stock 6.12.96 and 6.18.39 correctly ignore the unknown offered bit: the live
+probe recorded `offered=0x920000008` and `acked=0x120000000`, so bit 3 was not
+acknowledged. On AMD, Intel, and Arm, the resulting device still reached
+`DRIVER_OK` and a real guest-to-host `SOCK_STREAM` connection transferred 128 KiB
+past its credit window. Datagram support can return when it is upstream and has a
+real backend/guest consumer; it is not carried speculatively here.
+
+The four inherited reverts of later vsock SKB/credit changes are **not** part of
+the retained series either. They rolled back iterator correctness and nonlinear
+SKB allocation fixes, and one would remove the local credit cap for
+[CVE-2026-23086](https://nvd.nist.gov/vuln/detail/CVE-2026-23086), allowing a peer
+to drive excessive kernel memory allocation. Real stream tests pass with all four
+upstream fixes intact.
+
+## Removed in the 6.12.96/6.18.39 audit
+
+| Old patch area | Decision and evidence |
+|---|---|
+| `0001`–`0002`: do not panic when PID 1 exits / alter orderly reboot | **Dropped.** The first replaced the global-init panic with `orderly_reboot()` and suppressed normal restart messages; the second forced `orderly_reboot()` to skip its userspace helper and take the emergency restart path. They worked around an old direct-workload-as-PID-1 design. Current `init.substrate` is the default PID 1 supervisor: it forks/reaps the workload, reports its exact status, and invokes an architecture-aware reboot itself. Live tests report `exit 7` exactly and require an `exit 0` guest to self-terminate as `StopReason::Shutdown`. Direct PID-1 mode deliberately retains normal Linux semantics. |
+| `0011`–`0015`: arm64 memory-model and Apple TSO controls | **Dropped.** These exist for running x86 binaries through a userspace emulator on Apple arm64. Current substrate explicitly has no cross-architecture emulation contract, and the AWS arm host does not need Apple IMPDEF controls. `CONFIG_ARM64_ACTLR_STATE` is now forbidden. |
+| `0017`: compat input ioctls from 64-bit processes | **Dropped.** This supports userspace emulation/input translation. substrate exposes no input device and has no cross-architecture emulator consumer. |
+| `0018`, `0019`, `0022`: DAX and remote-mm fixes | **Dropped.** substrate's virtio-fs implementation has no shared-memory DAX window and rejects FUSE `SETUPMAPPING`/`REMOVEMAPPING`; `CONFIG_FUSE_DAX` is disabled. The remote-mm fix was carried solely for that obsolete DAX/debugger path. |
+| `0028`: overlayfs fileattr copy-up over virtio-fs | **Dropped.** The old rationale claimed a virtio-fs root filesystem. substrate boots an ext4 disk or initramfs and uses virtio-fs only for optional DAX-less volume mounts. Overlayfs itself remains configured; this downstream exception is not required by the current boot contract. |
+| `0023`–`0026`: four vsock networking reverts | **Dropped.** Stock stream vsock passes connect, control-response, 128 KiB credit-window, and retry tests with the upstream iterator/nonlinear-SKB fixes intact. The fourth revert would specifically undo the CVE-2026-23086 memory bound. |
+| `0028`–`0032`: virtio-RTC | **Dropped.** substrate implements PL031 RTC on arm64 and x86 KVM clock/ACPI timekeeping; it has no virtio-RTC device. `CONFIG_VIRTIO_RTC` is disabled. |
+| four `patches-tee/` changes plus SEV/TDX configs | **Dropped.** substrate has no SEV-SNP or TDX machine model, and the variants lacked the qboot/initrd assets needed to produce bootable bundles. Carrying compile-only confidential-compute code was not a supported feature. [ADR 0009](../adr/0009-confidential-compute-variants.md) records the supersession. |
+| TSI, x86 ACPI `legacy_pic`, virtio-GPU, and virtio-CAN from older audits | **Remain dropped.** No current substrate consumer justifies restoring them; see [ADR 0015](../adr/0015-drop-tsi-and-x86-acpi-legacy-pic.md). |
+
+## Policy and verification
+
+- Patch order is dependency order. Every file has its provenance and downstream
+  rationale in the commit message.
+- `make applies-clean KERNEL_LINE=<line>` rejects any fuzz or offset. A patch that
+  needs either is re-derived, never forced.
+- `make configured` checks the matching normalized config. Unimplemented device
+  families such as virtio-RTC and virtio-fs DAX are explicitly forbidden.
+- Both LTS lines build base and debug bundles for x86_64 and aarch64. The release
+  gate then boots them with substrate on the matching architecture; x86 is tested
+  on both AMD and Intel because the ACPICA/KVM boot path is hardware-sensitive.
+- The vsock gate records offered and acknowledged bits, proves an unknown DGRAM
+  offer is declined safely, and completes a real 128 KiB stream transfer. Clean
+  workload shutdown and DAX-less virtio-fs are separate checks.
+- `make repro-check` must produce byte-identical debug bundles, which exercises
+  the pahole patch rather than assuming it works. In the controlled audit, stock
+  pahole produced different bundles on both lines; adding only `0003` made both
+  two-clean-build checks byte-identical.
+
+Any future patch must name a live substrate consumer, cite its origin, include a
+targeted failure-mode test, and state when it can be deleted. Build success by
+itself is not evidence that a behavioral kernel patch is needed.

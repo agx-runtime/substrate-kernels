@@ -1,6 +1,6 @@
 """
-Build a flat `.kernel` bundle from a Linux kernel binary (and optional qboot /
-initrd for TEE variants). substrate mmaps the output, reads the fixed 96-byte
+Build a flat `.kernel` bundle from a Linux kernel binary (plus ABI-reserved
+optional qboot/initrd sections). substrate mmaps the output, reads the fixed 96-byte
 header, copies the payload to `load_addr`, and enters at `entry_addr` — with no
 kernel-image parser of its own (ADR 0004).
 
@@ -273,13 +273,15 @@ def main():
     p.add_argument("--abi-version", type=int, required=True)
     p.add_argument("--kernel", required=True,
                    help="vmlinux (x86_64) or Image (aarch64/riscv64)")
-    p.add_argument("--qboot", default=None, help="qboot firmware (TEE variants only)")
-    p.add_argument("--initrd", default=None, help="initrd (TEE variants only)")
+    p.add_argument("--qboot", default=None,
+                   help="optional qboot payload (reserved; unused by current builds)")
+    p.add_argument("--initrd", default=None,
+                   help="optional initrd payload (reserved; unused by current builds)")
     p.add_argument("--output", required=True)
     args = p.parse_args()
 
-    if args.variant in ("base", "windows") and (args.qboot or args.initrd):
-        print("warning: --qboot/--initrd provided for a non-TEE variant",
+    if args.variant in ("base", "debug", "windows") and (args.qboot or args.initrd):
+        print("warning: --qboot/--initrd provided for a current build variant",
               file=sys.stderr)
 
     bundle = pack(

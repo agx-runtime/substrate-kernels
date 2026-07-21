@@ -6,14 +6,23 @@
 #
 # Usage:
 #   make                       # build base for the host arch
+#   make KERNEL_LINE=6.18      # build Linux 6.18.39 instead of default 6.12.96
 #   make ARCH=aarch64          # build base for aarch64
 #   make VARIANT=windows       # build the windows variant (x86_64 only)
 #   make ci                    # run the static gates
 # On macOS the Linux-only stages run inside the pinned container automatically.
 
 # ---- pin (ADR 0001) --------------------------------------------------------
-include scripts/kernel-pin.env
-export KERNEL_VERSION KERNEL_SHA256 KERNEL_URL KERNEL_URL_FALLBACK
+# Both supported LTS lines are exact, hash-verified pins. 6.12 remains the
+# compatibility/default line; select the newer LTS explicitly with
+# `KERNEL_LINE=6.18`.
+KERNEL_LINE ?= 6.12
+KERNEL_PIN  := scripts/kernel-pins/$(KERNEL_LINE).env
+ifeq ($(wildcard $(KERNEL_PIN)),)
+  $(error unsupported KERNEL_LINE=$(KERNEL_LINE); expected one of: 6.12 6.18)
+endif
+include $(KERNEL_PIN)
+export KERNEL_LINE KERNEL_VERSION KERNEL_SHA256 KERNEL_URL KERNEL_URL_FALLBACK
 
 # ---- fixed build metadata (ADR 0005) ---------------------------------------
 # Fixed constants so nothing wall-clock- or host-dependent leaks into the image.
@@ -43,8 +52,8 @@ else
   GUESTARCH := $(ARCH)
 endif
 
-# windows / sev / tdx are x86_64-only variants.
-ifneq ($(filter $(VARIANT),sev tdx windows),)
+# windows is an x86_64-only carried variant.
+ifeq ($(VARIANT),windows)
   ifneq ($(GUESTARCH),x86_64)
     $(error VARIANT=$(VARIANT) is x86_64-only (got arch=$(GUESTARCH)))
   endif
@@ -69,22 +78,24 @@ KERNEL_BINARY   := $(KBINARY_$(GUESTARCH))
 
 # ---- paths -----------------------------------------------------------------
 TARBALL := tarballs/linux-$(KERNEL_VERSION).tar.xz
-BUILD   := build/$(VARIANT)-$(GUESTARCH)
+BUILD   := build/linux-$(KERNEL_VERSION)-$(VARIANT)-$(GUESTARCH)
 SRC     := $(BUILD)/linux-$(KERNEL_VERSION)
 CONFIG  := config-$(VARIANT)_$(GUESTARCH)
 BUNDLE  := linux-$(KERNEL_VERSION)-$(VARIANT)-$(GUESTARCH).kernel
 PREFIX  ?= /usr/local
 
-# Patch series: base series always; the quarantined TEE series for sev/tdx (ADR 0009).
-PATCHES := $(sort $(wildcard patches/*.patch))
-ifneq ($(filter $(VARIANT),sev tdx),)
-  PATCHES += $(sort $(wildcard patches-tee/*.patch))
+# Every supported line has an independently re-derived zero-offset series. A
+# shared patch file would immediately report an offset as the two trees drift.
+PATCH_DIR := patches/$(KERNEL_LINE)
+PATCHES   := $(sort $(wildcard $(PATCH_DIR)/*.patch))
+ifeq ($(strip $(PATCHES)),)
+  $(error no patch series found for KERNEL_LINE=$(KERNEL_LINE) in $(PATCH_DIR))
 endif
 
 IMAGE := substrate-kernels-build
 UNAME_S := $(shell uname -s)
 
-.PHONY: all image build install clean ci repro-check \
+.PHONY: all image build install clean clean-selected ci repro-check \
         applies-clean configured config-invariant bundle-golden pack-unit \
         check-doc-manifest
 
@@ -99,7 +110,8 @@ ifeq ($(UNAME_S),Darwin)
 # patch (the macOS host's) silently tolerates.
 all applies-clean configured repro-check: image
 	docker run --rm -v "$(CURDIR)":/work -w /work $(IMAGE) \
-		make $@ ARCH='$(GUESTARCH)' VARIANT='$(VARIANT)' ABI_VERSION='$(ABI_VERSION)' JOBS='$(JOBS)'
+		make $@ KERNEL_LINE='$(KERNEL_LINE)' ARCH='$(GUESTARCH)' \
+			VARIANT='$(VARIANT)' ABI_VERSION='$(ABI_VERSION)' JOBS='$(JOBS)'
 
 else
 
@@ -112,10 +124,10 @@ configured: $(SRC)/.config
 	@echo "configured: olddefconfig + config-invariant passed ($(VARIANT)/$(GUESTARCH))"
 
 repro-check:
-	$(MAKE) clean
+	$(MAKE) clean-selected
 	$(MAKE) $(BUNDLE)
 	cp "$(BUNDLE)" "$(BUNDLE).repro1"
-	rm -rf build "$(BUNDLE)"
+	rm -rf "$(BUILD)" "$(BUNDLE)"
 	$(MAKE) $(BUNDLE)
 	@cmp "$(BUNDLE)" "$(BUNDLE).repro1" \
 		&& echo "repro-check: byte-identical rebuild ($(VARIANT)/$(GUESTARCH))" \
@@ -193,6 +205,11 @@ install: all
 
 clean:
 	rm -rf build *.kernel *.kernel.repro1
+
+# Remove only the selected line/variant/architecture so both LTS lines can be
+# built side by side. `clean` deliberately remains the explicit all-lines wipe.
+clean-selected:
+	rm -rf "$(BUILD)" "$(BUNDLE)" "$(BUNDLE).repro1"
 
 # ===========================================================================
 # Gates (testing/strategy.md). The pure-Python ones run on any host; the

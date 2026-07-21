@@ -61,8 +61,8 @@ Worker responds 404 with no analytics emit.
 | `/linux-<v>-SHA256SUMS`              | `linux-<v>-SHA256SUMS`              | `linux-SHA256SUMS`       | `<v>` | `text/plain; charset=utf-8` |
 
 `<v>` is `[0-9]+\.[0-9]+\.[0-9]+` (matches `KERNEL_VERSION` shape in
-`scripts/kernel-pin.env`); `<variant>` is `[a-z]+` (`base`, `windows`,
-`sev`, `tdx`); `<arch>` is `[a-z0-9_]+` (`x86_64`, `aarch64`, `riscv64`).
+`scripts/kernel-pins/<line>.env`); `<variant>` is `[a-z]+` (currently `base`,
+`debug`, `windows`); `<arch>` is `[a-z0-9_]+` (`x86_64`, `aarch64`, `riscv64`).
 Path length is bounded; anything over the cap returns null without regex
 work.
 
@@ -271,7 +271,7 @@ lists ever add a `rsa-plugins` rule.
 ### Lifecycle — manual deploy
 
 `bunx wrangler deploy` from `download-proxy/`. Worker code rarely
-changes; kernel releases happen on tag pushes and don't touch the Worker.
+changes; manually dispatched kernel releases don't touch the Worker.
 [ADR 0011 §6](../adr/0011-download-proxy-with-analytics.md) records why
 no CI deploy workflow ships.
 

@@ -1,74 +1,102 @@
 name: Release
 
-# Build the .kernel bundles, attest their build provenance (ADR 0016), and publish
-# them as a GitHub Release + mirror to Cloudflare R2. Triggered by pushing a `v*`
-# tag, or run manually (workflow_dispatch) to cut a release from the current
-# commit. The kernel version comes from the pin (scripts/kernel-pin.env); the
-# release tag is `v<version>` (or `v<version>-r<N>` for a re-release of the same
-# kernel after a patch/config change). CI gates the commit; this workflow only
-# builds + publishes. R2 upload is skipped if the Cloudflare credentials are unset,
-# so the GitHub Release still publishes.
-#
-# Config: secrets CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID; variable R2_BUCKET.
-# Attestation needs no secrets — keyless sigstore signing via the job's OIDC token.
+run-name: Release commit ${{ inputs.commit }}
+
+# Releases are deliberate and repository-commit scoped. The operator supplies an
+# exact 40-character commit SHA; every job checks out that same commit, builds both
+# supported LTS lines, and publishes the eight bundles as one atomic release.
+# GitHub Releases require a tag, so the workflow creates the implementation tag
+# build-<12-char-sha>. Upstream kernel versions remain in the artifact filenames.
 
 on:
-  push:
-    tags: ["v*"]
   workflow_dispatch:
     inputs:
-      revision:
-        description: "Optional revision suffix (e.g. r2) when re-releasing the same kernel version"
-        required: false
-        default: ""
+      commit:
+        description: "Exact 40-character substrate-kernels commit SHA to release"
+        required: true
+        type: string
 
 permissions:
-  contents: write # create the GitHub Release (and tag, on workflow_dispatch)
+  contents: read
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ inputs.commit }}
   cancel-in-progress: false
 
 jobs:
-  # ---- resolve the version (from the pin) and the release tag -------------------
   prepare:
     runs-on: nscloud-ubuntu-24.04-amd64-2x4
     outputs:
-      version: ${{ steps.pin.outputs.version }}
-      tag: ${{ steps.pin.outputs.tag }}
+      commit: ${{ steps.release.outputs.commit }}
+      short_sha: ${{ steps.release.outputs.short_sha }}
+      tag: ${{ steps.release.outputs.tag }}
+      version_612: ${{ steps.release.outputs.version_612 }}
+      version_618: ${{ steps.release.outputs.version_618 }}
+      source_sha256_612: ${{ steps.release.outputs.source_sha256_612 }}
+      source_sha256_618: ${{ steps.release.outputs.source_sha256_618 }}
     steps:
-      - uses: actions/checkout@v6
-      - id: pin
+      - name: Validate the requested commit format
+        env:
+          REQUESTED_COMMIT: ${{ inputs.commit }}
         run: |
           set -euo pipefail
-          . scripts/kernel-pin.env
-          echo "version=$KERNEL_VERSION" >> "$GITHUB_OUTPUT"
-          if [ "${{ github.ref_type }}" = "tag" ]; then
-            tag="${{ github.ref_name }}"
-          else
-            rev="${{ inputs.revision }}"
-            tag="v${KERNEL_VERSION}${rev:+-$rev}"
+          if [[ ! "$REQUESTED_COMMIT" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            echo "::error::commit must be a full 40-character hexadecimal SHA"
+            exit 1
           fi
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "Release: version=$KERNEL_VERSION tag=$tag"
-          # A tag-triggered release must match the pinned kernel version, so the
-          # artifact names (linux-<version>-…) and the tag cannot drift apart.
-          case "$tag" in
-            *"$KERNEL_VERSION"*) : ;;
-            *) echo "::error::release tag '$tag' does not contain pinned kernel version '$KERNEL_VERSION'"; exit 1 ;;
-          esac
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.commit }}
+          fetch-depth: 1
+      - name: Resolve release identity and kernel pins
+        id: release
+        env:
+          REQUESTED_COMMIT: ${{ inputs.commit }}
+        run: |
+          set -euo pipefail
+          resolved=$(git rev-parse HEAD)
+          requested=$(printf '%s' "$REQUESTED_COMMIT" | tr 'A-F' 'a-f')
+          if [ "$resolved" != "$requested" ]; then
+            echo "::error::checkout resolved to $resolved, not requested commit $requested"
+            exit 1
+          fi
 
-  # ---- build the release bundles ({base, debug} × {x86_64, aarch64}) ------------
+          . scripts/kernel-pins/6.12.env
+          version_612=$KERNEL_VERSION
+          source_sha256_612=$KERNEL_SHA256
+          . scripts/kernel-pins/6.18.env
+          version_618=$KERNEL_VERSION
+          source_sha256_618=$KERNEL_SHA256
+
+          short_sha=${resolved:0:12}
+          {
+            echo "commit=$resolved"
+            echo "short_sha=$short_sha"
+            echo "tag=build-$short_sha"
+            echo "version_612=$version_612"
+            echo "version_618=$version_618"
+            echo "source_sha256_612=$source_sha256_612"
+            echo "source_sha256_618=$source_sha256_618"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "Release commit: $resolved"
+          echo "Kernel pins: linux $version_612 and linux $version_618"
+
+  # Both lines must build before publish starts: no partial release is possible.
   build:
     needs: prepare
     strategy:
-      fail-fast: true # never publish a partial release
+      fail-fast: true
       matrix:
         include:
-          - { arch: x86_64, rarch: amd64, variant: base }
-          - { arch: x86_64, rarch: amd64, variant: debug }
-          - { arch: aarch64, rarch: arm64, variant: base }
-          - { arch: aarch64, rarch: arm64, variant: debug }
+          - { kernel_line: "6.12", arch: x86_64, rarch: amd64, variant: base }
+          - { kernel_line: "6.12", arch: x86_64, rarch: amd64, variant: debug }
+          - { kernel_line: "6.12", arch: aarch64, rarch: arm64, variant: base }
+          - { kernel_line: "6.12", arch: aarch64, rarch: arm64, variant: debug }
+          - { kernel_line: "6.18", arch: x86_64, rarch: amd64, variant: base }
+          - { kernel_line: "6.18", arch: x86_64, rarch: amd64, variant: debug }
+          - { kernel_line: "6.18", arch: aarch64, rarch: arm64, variant: base }
+          - { kernel_line: "6.18", arch: aarch64, rarch: arm64, variant: debug }
     runs-on:
       - nscloud-ubuntu-24.04-${{ matrix.rarch }}-8x16-with-cache;github.run-id=${{ github.run_id }}
       - nscloud-cache-size-50gb
@@ -77,179 +105,191 @@ jobs:
       - namespace-features:container.privileged=true
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare.outputs.commit }}
+          fetch-depth: 1
+      - name: Read the selected pin
+        id: pin
+        run: |
+          set -euo pipefail
+          . "scripts/kernel-pins/${{ matrix.kernel_line }}.env"
+          echo "version=$KERNEL_VERSION" >> "$GITHUB_OUTPUT"
       - name: Cache the pinned kernel tarball
         uses: actions/cache@v5
         with:
           path: tarballs
-          key: kernel-tarball-${{ hashFiles('scripts/kernel-pin.env') }}
+          key: kernel-tarball-${{ matrix.kernel_line }}-${{ hashFiles('scripts/kernel-pins/*.env') }}
       - name: Build the pinned toolchain container
         run: docker build -t substrate-kernels-build tools/build
       - name: Build the bundle (compile + pack) in the pinned container
         run: |
           docker run --rm -v "$PWD":/work -w /work substrate-kernels-build \
-            make all ARCH=${{ matrix.arch }} VARIANT=${{ matrix.variant }}
+            make all KERNEL_LINE=${{ matrix.kernel_line }} ARCH=${{ matrix.arch }} VARIANT=${{ matrix.variant }}
       - uses: actions/upload-artifact@v7
         with:
-          name: bundle-${{ matrix.variant }}-${{ matrix.arch }}
-          path: linux-${{ needs.prepare.outputs.version }}-${{ matrix.variant }}-${{ matrix.arch }}.kernel
+          name: bundle-${{ matrix.kernel_line }}-${{ matrix.variant }}-${{ matrix.arch }}
+          path: linux-${{ steps.pin.outputs.version }}-${{ matrix.variant }}-${{ matrix.arch }}.kernel
           if-no-files-found: error
 
-  # ---- publish: attest + GitHub Release + Cloudflare R2 --------------------------
   publish:
     needs: [prepare, build]
     runs-on: nscloud-ubuntu-24.04-amd64-2x4
     permissions:
-      contents: write # create the GitHub Release
-      id-token: write # keyless sigstore signing (GitHub OIDC) for the attestation
-      attestations: write # store the provenance attestation on GitHub (ADR 0016)
+      contents: write
+      id-token: write
+      attestations: write
     env:
-      VERSION: ${{ needs.prepare.outputs.version }}
+      COMMIT: ${{ needs.prepare.outputs.commit }}
+      SHORT_SHA: ${{ needs.prepare.outputs.short_sha }}
       TAG: ${{ needs.prepare.outputs.tag }}
+      VERSION_612: ${{ needs.prepare.outputs.version_612 }}
+      VERSION_618: ${{ needs.prepare.outputs.version_618 }}
+      SOURCE_SHA256_612: ${{ needs.prepare.outputs.source_sha256_612 }}
+      SOURCE_SHA256_618: ${{ needs.prepare.outputs.source_sha256_618 }}
       GH_TOKEN: ${{ github.token }}
-      # Proxy for "are the Cloudflare R2 credentials configured?" — gates the R2 steps.
       CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare.outputs.commit }}
+          fetch-depth: 1
       - uses: actions/download-artifact@v8
         with:
           pattern: bundle-*
           merge-multiple: true
-      - name: Compute SHA256SUMS
+      - name: Verify the complete artifact set and write checksums
         run: |
-          sha256sum \
-            "linux-${VERSION}-base-x86_64.kernel" \
-            "linux-${VERSION}-base-aarch64.kernel" \
-            "linux-${VERSION}-debug-x86_64.kernel" \
-            "linux-${VERSION}-debug-aarch64.kernel" \
-            | tee SHA256SUMS
-      # SLSA build provenance for every published artifact (ADR 0016): keyless
-      # sigstore signing via GitHub OIDC; the attestation is stored on GitHub
-      # (verifiable with `gh attestation verify`) and the bundle is mirrored as a
-      # release asset + R2 object below.
-      - name: Attest bundle provenance
+          set -euo pipefail
+          bundles=(
+            "linux-${VERSION_612}-base-x86_64.kernel"
+            "linux-${VERSION_612}-base-aarch64.kernel"
+            "linux-${VERSION_612}-debug-x86_64.kernel"
+            "linux-${VERSION_612}-debug-aarch64.kernel"
+            "linux-${VERSION_618}-base-x86_64.kernel"
+            "linux-${VERSION_618}-base-aarch64.kernel"
+            "linux-${VERSION_618}-debug-x86_64.kernel"
+            "linux-${VERSION_618}-debug-aarch64.kernel"
+          )
+          for bundle in "${bundles[@]}"; do
+            test -f "$bundle" || { echo "::error::missing release artifact $bundle"; exit 1; }
+          done
+          sha256sum "${bundles[@]}" | LC_ALL=C sort -k2 > SHA256SUMS
+          grep "  linux-${VERSION_612}-" SHA256SUMS > "linux-${VERSION_612}-SHA256SUMS"
+          grep "  linux-${VERSION_618}-" SHA256SUMS > "linux-${VERSION_618}-SHA256SUMS"
+          cat SHA256SUMS
+      - name: Write the release manifest
+        run: |
+          cat > RELEASE-MANIFEST.json <<EOF
+          {
+            "repository": "$GITHUB_REPOSITORY",
+            "commit": "$COMMIT",
+            "release_tag": "$TAG",
+            "kernels": {
+              "6.12": { "version": "$VERSION_612", "source_sha256": "$SOURCE_SHA256_612" },
+              "6.18": { "version": "$VERSION_618", "source_sha256": "$SOURCE_SHA256_618" }
+            }
+          }
+          EOF
+      - name: Attest release provenance
         id: attest
         uses: actions/attest-build-provenance@v2
         with:
           subject-path: |
-            linux-${{ env.VERSION }}-*.kernel
+            linux-*.kernel
             SHA256SUMS
-      - name: Stage the attestation bundle as a release artifact
-        run: cp "${{ steps.attest.outputs.bundle-path }}" "linux-${VERSION}-attestations.sigstore.jsonl"
-      - name: Write release notes
+            linux-*-SHA256SUMS
+            RELEASE-MANIFEST.json
+      - name: Stage attestation artifacts
         run: |
           set -euo pipefail
-          . scripts/kernel-pin.env
+          attestation="substrate-kernels-${SHORT_SHA}-attestations.sigstore.jsonl"
+          cp "${{ steps.attest.outputs.bundle-path }}" "$attestation"
+          cp "$attestation" "linux-${VERSION_612}-attestations.sigstore.jsonl"
+          cp "$attestation" "linux-${VERSION_618}-attestations.sigstore.jsonl"
+      - name: Write release notes
+        run: |
           cat > RELEASE_NOTES.md <<EOF
-          substrate-kernels \`$TAG\` — the pre-flattened \`.kernel\` bundles for substrate,
-          built from the pinned **linux $VERSION** (sha256 \`$KERNEL_SHA256\`).
+          substrate-kernels **$TAG**, built from repository commit **$COMMIT**.
 
-          **Artifacts:**
-          - \`linux-$VERSION-base-x86_64.kernel\` / \`linux-$VERSION-base-aarch64.kernel\`
-            — the production guest kernel (monolithic, virtio-only, no tracing).
-          - \`linux-$VERSION-debug-x86_64.kernel\` / \`linux-$VERSION-debug-aarch64.kernel\`
-            — same kernel + ftrace, kprobes, BPF tracing, BTF, DWARF5, kgdb (ADR 0013).
-          - \`SHA256SUMS\` — checksums for all four bundles.
-          - \`linux-$VERSION-attestations.sigstore.jsonl\` — the SLSA build-provenance
-            attestation bundle covering every artifact above (ADR 0016).
+          This is one atomic release for both pinned LTS lines:
 
-          **aarch64 boot contract (ADR 0004):** aarch64 bundles load at the consumer's
-          DRAM base — \`load_addr = entry_addr = 0x40000000\` (+ the Image header's
-          \`text_offset\`), so the kernel sits at the start of guest RAM and any RAM
-          size that holds the image boots. Bundles published before this contract
-          revision loaded at \`0x80000000\` and imposed a ~1 GiB RAM boot floor.
+          - linux $VERSION_612 (source sha256 $SOURCE_SHA256_612)
+          - linux $VERSION_618 (source sha256 $SOURCE_SHA256_618)
 
-          **Sequencing warning — substrate must converge before consuming these
-          bundles:** a substrate that still writes its initial VMGENID GUID at
-          RAM_BASE + 1 MiB (\`0x40100000\`) will corrupt 16 bytes of kernel text
-          before the first instruction executes when the kernel loads at
-          \`0x40000000\` (a nondeterministic crash). substrate must NOT bump its
-          kernel pin until its guest-layout change (VMGENID relocation + the
-          cold_boot \`load_addr\` validation) has landed. The reverse direction is
-          safe: an old \`0x80000000\` bundle under the converged substrate is
-          rejected with a typed cold_boot error.
+          Each line contains **base** and **debug** bundles for **x86_64** and
+          **aarch64** (eight .kernel files total). **SHA256SUMS** covers all
+          eight bundles; the two version-scoped checksum files are the matching
+          R2 download manifests. **RELEASE-MANIFEST.json** records the exact
+          repository commit and source pins.
 
-          **Re-released artifacts** replace same-named R2 objects. The download
-          proxy serves \`.kernel\` files with a 1-year immutable cache policy, so a
-          CF edge that already served an older byte-stream may keep serving it
-          until purged or evicted; \`linux-$VERSION-SHA256SUMS\` (5-minute cache) is
-          the source of truth for which bytes are current.
+          Every bundle and manifest carries keyless SLSA build provenance. Verify
+          a bundle with:
 
-          **Provenance:** every artifact carries SLSA build provenance (keyless
-          sigstore signing via GitHub OIDC). Verify with:
+              gh attestation verify linux-$VERSION_612-base-x86_64.kernel --repo $GITHUB_REPOSITORY
 
-              gh attestation verify linux-$VERSION-base-x86_64.kernel --repo $GITHUB_REPOSITORY
+          The GitHub release/tag is the immutable, commit-scoped release identity.
+          R2 keeps the existing upstream-version URLs as consumer aliases, for
+          example:
 
-          Builds are byte-reproducible, so each bundle's sha256 is a stable content
-          identity. Also published to Cloudflare R2, served at
-          https://kernels.substrate.so/linux-$VERSION-base-x86_64.kernel
-          (and the matching debug/aarch64 bundles + \`linux-$VERSION-SHA256SUMS\`).
+              https://kernels.substrate.so/linux-$VERSION_612-base-x86_64.kernel
+              https://kernels.substrate.so/linux-$VERSION_618-base-x86_64.kernel
+
+          Releasing a different commit without changing a kernel pin replaces that
+          line's same-named R2 aliases; the commit-scoped GitHub releases retain
+          the historical artifacts and provenance.
           EOF
-      - name: Create or update the GitHub Release
+      - name: Create or update the commit-scoped GitHub Release
         run: |
           set -euo pipefail
           assets=(
-            "linux-${VERSION}-base-x86_64.kernel"
-            "linux-${VERSION}-base-aarch64.kernel"
-            "linux-${VERSION}-debug-x86_64.kernel"
-            "linux-${VERSION}-debug-aarch64.kernel"
+            linux-*.kernel
             SHA256SUMS
-            "linux-${VERSION}-attestations.sigstore.jsonl"
+            linux-*-SHA256SUMS
+            RELEASE-MANIFEST.json
+            "substrate-kernels-${SHORT_SHA}-attestations.sigstore.jsonl"
           )
-          # Idempotent: if a prior run already created the release (e.g. the R2 mirror
-          # failed afterwards), re-attach the assets instead of failing on collision.
+
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
+            git fetch --force origin "refs/tags/$TAG:refs/tags/$TAG"
+            tagged_commit=$(git rev-list -n 1 "$TAG")
+            if [ "$tagged_commit" != "$COMMIT" ]; then
+              echo "::error::tag $TAG already points to $tagged_commit, not $COMMIT"
+              exit 1
+            fi
+          fi
+
+          title="substrate-kernels $TAG (linux $VERSION_612 + $VERSION_618)"
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "release $TAG already exists — re-uploading assets (--clobber)"
-            gh release upload "$TAG" "${assets[@]}" --repo "$GITHUB_REPOSITORY" --clobber
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" \
+              --title "$title" --notes-file RELEASE_NOTES.md
+            gh release upload "$TAG" "${assets[@]}" \
+              --repo "$GITHUB_REPOSITORY" --clobber
           else
             gh release create "$TAG" "${assets[@]}" \
               --repo "$GITHUB_REPOSITORY" \
-              --title "substrate-kernels $TAG (linux $VERSION)" \
+              --target "$COMMIT" \
+              --title "$title" \
               --notes-file RELEASE_NOTES.md
           fi
 
-      # ---- mirror to Cloudflare R2 (skipped if secrets are unset) ---------------
-      - name: Upload base x86_64 bundle to R2
+      # R2 is a best-effort public mirror. A missing token skips it; configured
+      # credentials turn upload failures into a visible failed workflow rerun.
+      - name: Mirror both kernel lines to Cloudflare R2
         if: ${{ env.CF_TOKEN != '' }}
         uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: r2 object put "${{ vars.R2_BUCKET }}/linux-${{ env.VERSION }}-base-x86_64.kernel" --file=linux-${{ env.VERSION }}-base-x86_64.kernel --remote
-      - name: Upload base aarch64 bundle to R2
-        if: ${{ env.CF_TOKEN != '' }}
-        uses: cloudflare/wrangler-action@v4
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: r2 object put "${{ vars.R2_BUCKET }}/linux-${{ env.VERSION }}-base-aarch64.kernel" --file=linux-${{ env.VERSION }}-base-aarch64.kernel --remote
-      - name: Upload debug x86_64 bundle to R2
-        if: ${{ env.CF_TOKEN != '' }}
-        uses: cloudflare/wrangler-action@v4
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: r2 object put "${{ vars.R2_BUCKET }}/linux-${{ env.VERSION }}-debug-x86_64.kernel" --file=linux-${{ env.VERSION }}-debug-x86_64.kernel --remote
-      - name: Upload debug aarch64 bundle to R2
-        if: ${{ env.CF_TOKEN != '' }}
-        uses: cloudflare/wrangler-action@v4
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: r2 object put "${{ vars.R2_BUCKET }}/linux-${{ env.VERSION }}-debug-aarch64.kernel" --file=linux-${{ env.VERSION }}-debug-aarch64.kernel --remote
-      - name: Upload SHA256SUMS to R2
-        if: ${{ env.CF_TOKEN != '' }}
-        uses: cloudflare/wrangler-action@v4
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          # version-scoped so successive releases don't clobber it at the bucket root
-          command: r2 object put "${{ vars.R2_BUCKET }}/linux-${{ env.VERSION }}-SHA256SUMS" --file=SHA256SUMS --remote
-      - name: Upload the attestation bundle to R2
-        if: ${{ env.CF_TOKEN != '' }}
-        uses: cloudflare/wrangler-action@v4
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          # offline mirror of the provenance attestation (ADR 0016); the primary
-          # verify path is GitHub's attestation store via `gh attestation verify`
-          command: r2 object put "${{ vars.R2_BUCKET }}/linux-${{ env.VERSION }}-attestations.sigstore.jsonl" --file=linux-${{ env.VERSION }}-attestations.sigstore.jsonl --remote
+          command: |
+            r2 object put "${{ vars.R2_BUCKET }}/linux-${{ env.VERSION_612 }}-base-x86_64.kernel" --file=linux-${{ env.VERSION_612 }}-base-x86_64.kernel --remote
+            r2 object put "${{ vars.R2_BUCKET }}/linux-${{ env.VERSION_612 }}-base-aarch64.kernel" --file=linux-${{ env.VERSION_612 }}-base-aarch64.kernel --remote
+            r2 object put "${{ vars.R2_BUCKET }}/linux-${{ env.VERSION_612 }}-debug-x86_64.kernel" --file=linux-${{ env.VERSION_612 }}-debug-x86_64.kernel --remote
+            r2 object put "${{ vars.R2_BUCKET }}/linux-${{ env.VERSION_612 }}-debug-aarch64.kernel" --file=linux-${{ env.VERSION_612 }}-debug-aarch64.kernel --remote
+            r2 object put "${{ vars.R2_BUCKET }}/linux-${{ env.VERSION_618 }}-base-x86_64.kernel" --file=linux-${{ env.VERSION_618 }}-base-x86_64.kernel --remote
+            r2 object put "${{ vars.R2_BUCKET }}/linux-${{ env.VERSION_618 }}-base-aarch64.kernel" --file=linux-${{ env.VERSION_618 }}-base-aarch64.kernel --remote
+            r2 object put "${{ vars.R2_BUCKET }}/linux-${{ env.VERSION_618 }}-debug-x86_64.kernel" --file=linux-${{ env.VERSION_618 }}-debug-x86_64.kernel --remote
+            r2 object put "${{ vars.R2_BUCKET }}/linux-${{ env.VERSION_618 }}-debug-aarch64.kernel" --file=linux-${{ env.VERSION_618 }}-debug-aarch64.kernel --remote
+            r2 object put "${{ vars.R2_BUCKET }}/linux-${{ env.VERSION_612 }}-SHA256SUMS" --file=linux-${{ env.VERSION_612 }}-SHA256SUMS --remote
+            r2 object put "${{ vars.R2_BUCKET }}/linux-${{ env.VERSION_618 }}-SHA256SUMS" --file=linux-${{ env.VERSION_618 }}-SHA256SUMS --remote
+            r2 object put "${{ vars.R2_BUCKET }}/linux-${{ env.VERSION_612 }}-attestations.sigstore.jsonl" --file=linux-${{ env.VERSION_612 }}-attestations.sigstore.jsonl --remote
+            r2 object put "${{ vars.R2_BUCKET }}/linux-${{ env.VERSION_618 }}-attestations.sigstore.jsonl" --file=linux-${{ env.VERSION_618 }}-attestations.sigstore.jsonl --remote

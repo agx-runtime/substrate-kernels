@@ -1,106 +1,66 @@
 # ADR 0008 — Kernel capability surface vs VMM device scope
 
-- **Status:** Accepted
+- **Status:** Accepted (revised 2026-07-20)
 - **Date:** 2026-05-27
-- **Context doc:** [../architecture.md](../architecture.md) §5 (the capability
-  surface); CLAUDE.md §1 (scope IN/OUT); [ADR 0009](0009-confidential-compute-variants.md)
-  (the TEE variants)
-
-> **Amended by [ADR 0015](0015-drop-tsi-and-x86-acpi-legacy-pic.md):** the kernel-side
-> TSI driver has since been **dropped** from the carried set (a downstream-maintenance
-> trim). The TSI references below are the historical record — TSI is no longer carried
-> or required by substrate's contract. The capability-vs-scope *principle* this ADR
-> establishes is unchanged; only TSI's membership in the carried set is.
+- **Context doc:** [../architecture.md](../architecture.md) §5; CLAUDE.md §1;
+  [ADR 0015](0015-drop-tsi-and-x86-acpi-legacy-pic.md)
 
 ## Context
 
-A guest kernel ships *drivers*; a VMM *instantiates devices*. These are different
-scopes, and conflating them produces two opposite errors: a kernel too lean to
-support a substrate feature (a missing driver = a feature substrate cannot offer),
-or a worry that a kernel carrying a driver substrate doesn't wire somehow widens
-the guest→host attack surface.
+A guest kernel ships drivers; a VMM instantiates devices. Those are different
+scopes. An uninstantiated built-in driver cannot reach the host, but it still costs
+image size and adds guest attack surface, so “the VMM does not expose it” is not by
+itself a reason to carry it.
 
-This matters because the carried driver set is broader than substrate's
-*minimal* device set. Cross-checking against substrate's
-own architecture.md §1 feature contract:
+The 2026-07-20 audit checked the kernel against substrate's current machine model:
 
-- **virtio block / net / vsock / console / rng** — substrate's core devices. In
-  scope on both sides; no tension.
-- **TSI (transparent socket interception)** — substrate's net contract explicitly
-  includes "TSI … coexisting with virtio-net, and a per-connect JSON egress
-  policy" (substrate architecture.md §1.3). The kernel-side TSI driver is *required*
-  for that feature. **In scope.**
-- **vsock datagrams** — substrate's vsock muxer (substrate ADR 0015) is the host
-  side; datagram support is a kernel capability that broadens what the muxer can
-  carry. In scope.
-- **virtio-fs / DAX** — substrate keeps virtiofs "only for explicit user `--volume`
-  bind mounts, and is optional" and **never as rootfs**. The kernel-side
-  virtio-fs/DAX driver is needed for those optional mounts. **In scope.**
-- **virtio-rtc** — a guest timekeeping capability with no host security exposure;
-  carried so substrate *may* wire it.
-- **TEE / SEV / TDX** — carried only behind the sev/tdx variants (ADR 0009), not in
-  a base build.
-- **GPU / virtio-gpu / DRM** — cut on both sides (user: "just not GPUs").
-
-The bundle header carries **no capability-advertisement field**: substrate wires
-devices from its own configuration against the kernel's fixed per-variant feature
-set. We still need a principle that makes a carried-but-unwired driver safe.
+- substrate instantiates virtio block, net, vsock, console, rng, balloon, and
+  optional virtio-fs devices;
+- its vsock device advertises the experimental DGRAM bit and retains a public
+  backend seam, but no shipped real backend or guest control path consumes it;
+  stock Linux declines that unknown bit while stream vsock remains functional;
+- virtio-fs has no DAX shared-memory window, so the non-DAX FUSE driver is enough;
+- arm64 gets wall time from PL031; x86 boots from ACPI and uses its normal KVM
+  clock/timekeeping path;
+- substrate has no virtio-RTC, TSI, PCI device model, GPU, SEV-SNP machine model,
+  or TDX machine model.
 
 ## Decision
 
-1. **The kernel provides capability; substrate controls exposure.** The kernel may
-   build in a driver substrate does not instantiate in a given configuration. The
-   guest→host security boundary is enforced by **substrate not creating the
-   device** (no virtqueue, no MMIO region, no backend), **not** by the kernel
-   lacking the driver. A driver with no backing device is inert: it probes nothing
-   and exposes nothing to the host.
+1. **substrate controls host exposure, and the kernel carries only exercised
+   capabilities.** A device is host-reachable only when substrate creates its
+   MMIO transport, queues, interrupts, and backend. Separately, every built-in
+   kernel driver needs a current substrate consumer or boot-contract rationale.
 
-2. **The carried set is the base feature set.** Concretely: block,
-   net (with TSI), vsock (with datagrams), console, rng, virtio-fs/DAX, and
-   virtio-rtc. Each is justified in [design/patches.md](../design/patches.md) /
-   [design/kernel-config.md](../design/kernel-config.md) against the substrate
-   feature it serves. GPU is cut (CLAUDE.md §1); CAN is dropped (no substrate
-   consumer, [design/patches.md](../design/patches.md)).
+2. **The current guest device set is explicit.** Base and debug kernels carry
+   virtio block/net/stream-vsock/console/rng/balloon and non-DAX virtio-fs. arm64
+   carries PL031. x86 carries ACPICA because substrate describes its virtio-mmio
+   devices in AML; `CONFIG_PCI` remains off. GPU/DRM, DAX, virtio-RTC, TSI, and
+   TEE support are absent.
 
-3. **There is no capability-advertisement field; substrate knows the carried set
-   implicitly.** The bundle header carries no `capability_flags`. Because a base bundle always
-   carries the same feature set (it is a single, versioned artifact), substrate
-   wires devices from its own configuration and relies on that fixed set. Adding or removing a capability is a deliberate, reviewed change to
-   the kernel config/patches *and* the matching substrate wiring — not something the
-   header negotiates at run time.
+3. **There is no bundle capability bitset.** A bundle's line/architecture/variant
+   selects a reviewed, fixed feature set. Adding or removing a capability changes
+   the configs or patches and the matching substrate implementation together.
 
-4. **TEE lives behind the sev/tdx variants** (ADR 0009): the confidential-compute
-   drivers, patches, and (eventually) firmware are present only in those variants,
-   not in a base build. The bundle's `variant` field tells substrate which it is.
-
-5. **A carried driver still pays a cost.** Extra built-in drivers add image size
-   (architecture.md §6 budget) and in-*guest* attack surface. Each carried
-   driver is justified per-feature (CLAUDE.md §1), and the size budget + the
-   per-patch keep/drop rationale ([design/patches.md](../design/patches.md)) are the
-   backstop against creep.
+4. **Compile-only inventory is not a supported feature.** The former SEV/TDX
+   configs and patch quarantine were removed ([ADR 0009](0009-confidential-compute-variants.md)).
+   A future optional device or confidential-compute mode returns only with a real
+   substrate machine model and an end-to-end boot test.
 
 ## Consequences
 
-- The kernel supports substrate's full feature contract (including TSI and optional
-  virtio-fs mounts) without substrate-kernels tracking which devices a given
-  substrate build happens to wire.
-- A carried-but-unwired driver cannot widen the *host* attack surface, because the
-  host surface is the set of *devices substrate instantiates*, which the embedder
-  controls — the principle in Decision §1.
-- The header carries no capability field, so substrate's loader stays a thin,
-  fixed contract.
-- The size/attack-surface cost of carried drivers is real and is governed by
-  the per-feature justification + the size budget, not waved away.
+- The host boundary is still determined by devices substrate instantiates.
+- The kernel surface is smaller than the old “maybe substrate will wire it” set.
+- virtio-fs volumes remain supported without carrying an unusable DAX path.
+- The ACPICA patch remains because a same-tree negative boot proves it is required.
+  The six DGRAM RFC patches were removed because there is no production consumer;
+  real stream tests pass on stock 6.12.96 and 6.18.39 when bit 3 is declined.
 
 ## Alternatives considered
 
-- **Advertise capabilities via a `capability_flags` header field** — rejected: the
-  header is a fixed, versioned contract and substrate reads specific field offsets
-  (ADR 0003), so adding a bitset would break the consumer for no gain. substrate
-  relies on the fixed per-variant feature set instead.
-- **Make the kernel exactly substrate's minimal device set, nothing more** —
-  rejected: it would drop TSI and virtio-fs, which substrate's feature contract
-  *requires*.
-- **Gate every optional driver behind its own build variant** — rejected as
-  over-fragmentation: an inert built-in driver costs only image size, which the
-  budget governs. The variants we carry are sev/tdx/windows.
+- **Keep every plausibly useful driver because an unwired driver is inert** —
+  rejected: it ignores image-size, maintenance, and in-guest security costs.
+- **Advertise individual capabilities in the fixed bundle header** — rejected:
+  supported cells have reviewed fixed configs, and changing the v1 producer/
+  consumer ABI adds negotiation without solving a current problem.
+- **One build variant per optional driver** — rejected as needless matrix growth.

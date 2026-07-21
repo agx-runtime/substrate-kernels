@@ -8,15 +8,13 @@ contract.
 
 ## Background
 
-The per-arch configs (`config-*_{x86_64,aarch64,riscv64}`, plus
-`-sev`/`-tdx`/`-windows` variants): monolithic (`CONFIG_MODULES=n`), the virtio
-device set (`VIRTIO_{BLK,NET,CONSOLE,VSOCKETS,MMIO,FS,RTC}`), `OVERLAY_FS`,
-`FUSE_FS` + `FUSE_DAX`, `TMPFS`/`DEVTMPFS`, hotplug CPU, `NR_CPUS` bounded, and the
-broad set of disabled subsystems (audit, USB, sound, most PCI). We carry the
-reference's full config set (x86_64 / aarch64 / riscv64 base + the x86-only sev /
-tdx / windows variants, [ADR 0002](../adr/0002-target-architectures.md)) and drop
-only GPU and CAN ([design/patches.md](patches.md)), with substrate-native naming
-throughout ([ADR 0008](../adr/0008-kernel-capability-surface-vs-vmm-scope.md)).
+The per-arch configs (`config-{base,debug}_{x86_64,aarch64}` plus carried
+riscv64-base and x86_64-windows cells) are monolithic (`CONFIG_MODULES=n`). They
+enable only substrate's virtio device set, ext4/overlay/tmpfs boot support,
+DAX-less virtio-fs, bounded CPU topology, and the networking surface needed by a
+container guest. The removed SEV/TDX configs, virtio-RTC, virtio-fs DAX, GPU, CAN,
+and emulation-only arm64 TSO controls are explicit forbidden invariants rather
+than dormant promises.
 
 ## Subtle details & gotchas
 
@@ -27,7 +25,7 @@ throughout ([ADR 0008](../adr/0008-kernel-capability-surface-vs-vmm-scope.md)).
 | **PCI policy** — disabling PCI entirely breaks some x86 ACPI paths | PCI disabled; ACPI patched to cope ([patches.md](patches.md) ACPI fixes) | match: PCI off where possible + the x86 ACPI hypervisor patches; document the coupling | boot-smoke (x86) |
 | **DRM/framebuffer pulls in a large subsystem** | GPU configs enabled | **disabled** — GPU is cut (CLAUDE.md §1) | config-invariant gate (forbidden set) |
 | **Reproducibility-hostile config** — embedded build IDs/timestamps | (relies on `KBUILD_BUILD_*`) | also disable embedded IDs/timestamps in config where possible ([ADR 0005](../adr/0005-build-environment-and-reproducibility.md)) | `make repro-check` |
-| **TEE config must not leak into base** | separate `-sev`/`-tdx` configs | base configs carry **no** TEE options; sev/tdx are separate cells ([ADR 0009](../adr/0009-confidential-compute-variants.md)) | config-invariant (base forbids TEE) |
+| **Unsupported features must not look releasable** | inherited configs carried deferred features | SEV/TDX, virtio-RTC, FUSE DAX, and emulation-only arm64 ACTLR state are forbidden in every current release cell | config-invariant forbidden set |
 | **Container-runtime netfilter must survive `olddefconfig`** — a container engine programs a broad netfilter/bridge set; a dropped `xt_addrtype` or masquerade target makes dockerd fail to register its bridge driver | (ungated) | assert the Docker-required netfilter/bridge/NAT set on `base`/`debug`; note `BRIDGE_VLAN_FILTERING` *depends on* `VLAN_8021Q` and `IP6_NF_TARGET_MASQUERADE` *depends on* `IP6_NF_NAT` (enable each dep in the same pass) ([ADR 0014](../adr/0014-container-runtime-networking.md)) | config-invariant gate |
 
 ## Our design
@@ -42,10 +40,10 @@ throughout ([ADR 0008](../adr/0008-kernel-capability-surface-vs-vmm-scope.md)).
   the guest reports free pages back to the host). (Kernel-side `TSI` was carried via
   its patch's config symbol but has since been dropped —
   [ADR 0015](../adr/0015-drop-tsi-and-x86-acpi-legacy-pic.md).)
-- **Optional substrate capabilities:** `FUSE_FS` + `VIRTIO_FS` + `FUSE_DAX` (for
-  `--volume` mounts, never rootfs — substrate architecture.md §1), `VIRTIO_RTC`
-  (timekeeping). These are part of the kernel's fixed feature set; there is no
-  header capability advertisement ([ADR 0008](../adr/0008-kernel-capability-surface-vs-vmm-scope.md)).
+- **Optional substrate capabilities:** `FUSE_FS` + `VIRTIO_FS` for `--volume`
+  mounts, never rootfs. substrate exposes no shared-memory window and rejects
+  FUSE mapping requests, so `FUSE_DAX=n`. Timekeeping comes from PL031 on arm64
+  and KVM clock/ACPI on x86; substrate has no virtio-RTC device.
 - **Filesystems / boot essentials:** `OVERLAY_FS`, `TMPFS`, `DEVTMPFS` (+ auto
   mount), `EXT4_FS` (the production rootfs is a sparse ext4 disk — substrate
   architecture.md §1). `BLK_DEV_INITRD` is **enabled** in every variant — base
@@ -72,8 +70,10 @@ throughout ([ADR 0008](../adr/0008-kernel-capability-surface-vs-vmm-scope.md)).
 - **USB, sound, most PCI, audit, legacy input** — a microVM never sees these.
   `CONFIG_SOUND` is cut explicitly; with no sound device wired, the core would
   initialize for nothing.
-- **GPU/CAN** — GPU is cut (CLAUDE.md §1); the virtio-CAN driver is dropped (no
-  substrate consumer, [design/patches.md](patches.md)).
+- **GPU/CAN, virtio-RTC, and FUSE DAX** — no substrate device or shared-memory
+  contract exists for them ([design/patches.md](patches.md)).
+- **SEV/TDX guest support and arm64 ACTLR memory-model controls** — substrate has
+  neither a confidential-compute machine model nor a cross-architecture emulator.
 - **Btrfs** — `CONFIG_BTRFS_FS=n`. The substrate rootfs is ext4 and
   CoW/snapshotting is the VMM's responsibility (substrate architecture.md §1);
   Btrfs adds image size + an `lib/raid6/` boot-time benchmark for no live
@@ -111,13 +111,11 @@ throughout ([ADR 0008](../adr/0008-kernel-capability-surface-vs-vmm-scope.md)).
 - **x86_64 vs aarch64 vs riscv64:** arch core options; the x86 ACPI options
   (`CONFIG_PVH=y` is carried as a kernel capability, but the boot path is the 64-bit
   `boot_params` entry, not PVH — [ADR 0004](../adr/0004-boot-contract-with-substrate.md));
-  the aarch64 timer/GIC options. TSO/memory-model options are aarch64-only
-  ([patches.md](patches.md)).
-- **base vs sev/tdx/windows (x86 only):** the TEE cells add the confidential-compute
-  options (memory-encryption, restricted-DMA, the secret-retrieval path) and base
-  cells **forbid** them ([ADR 0009](../adr/0009-confidential-compute-variants.md));
-  the windows cell adds Hyper-V enlightenments (`CONFIG_HYPERV*`) and is packed at
-  4 KiB ([ADR 0002](../adr/0002-target-architectures.md)).
+  the aarch64 timer/GIC/PL031 options. The old Apple TSO/memory-model additions
+  were removed with their patches ([patches.md](patches.md)).
+- **base vs windows (x86 only):** the windows cell adds Hyper-V enlightenments
+  (`CONFIG_HYPERV*`) and is packed at 4 KiB
+  ([ADR 0002](../adr/0002-target-architectures.md)). SEV/TDX are not cells.
 - **base vs debug** (x86_64, aarch64 — [ADR 0013](../adr/0013-debug-variant.md)):
   the debug cell adds tracing (`CONFIG_FTRACE`, `CONFIG_FUNCTION_TRACER`,
   `CONFIG_FUNCTION_GRAPH_TRACER`, `CONFIG_DYNAMIC_FTRACE`,
@@ -127,9 +125,9 @@ throughout ([ADR 0008](../adr/0008-kernel-capability-surface-vs-vmm-scope.md)).
   `CONFIG_BPF_JIT_ALWAYS_ON`), and source-level debug
   (`CONFIG_DEBUG_INFO_DWARF5`, `CONFIG_DEBUG_INFO_BTF`, `CONFIG_GDB_SCRIPTS`).
   The cuts above (Btrfs, SOUND, FAT/NLS, CMA on aarch64) stay cut in debug.
-- **guest-model cells vs sev/tdx/windows:** the container-runtime networking surface
-  (netfilter/bridge/NAT — see below) is carried on `base`/`debug` (x86_64, aarch64) and
-  `base` (riscv64), and is **absent** on the sev/tdx/windows variants
+- **guest-model cells vs windows:** the container-runtime networking surface
+  (netfilter/bridge/NAT — see below) is carried on `base`/`debug` (x86_64, aarch64)
+  and `base` (riscv64), and is **absent** on the windows variant
   ([ADR 0014](../adr/0014-container-runtime-networking.md)).
 
 **eBPF + XDP guarantees** (every variant; the gate enforces them):
@@ -138,7 +136,7 @@ throughout ([ADR 0008](../adr/0008-kernel-capability-surface-vs-vmm-scope.md)).
   BPF programs load and attach to cgroups in every variant.
 - `CONFIG_XDP_SOCKETS=y` in the variants that ship as the substrate guest
   model (`base`, `debug`) — so userspace can attach XDP programs to
-  virtio-net. windows / sev / tdx do not require XDP.
+  virtio-net. windows does not require XDP.
 - `CONFIG_BPF_JIT=y` is in **debug** only — JIT depends on tracing surface
   the base variant does not carry, and the BPF interpreter is sufficient for
   base's expected workloads.
@@ -155,7 +153,7 @@ pin so it is no longer a valid symbol.
 guest-model cells (`base`/`debug` on x86_64 & aarch64, plus `base` on riscv64), so a
 substrate guest can run a container engine (`dockerd`/`containerd`) with its default
 bridge network ([ADR 0014](../adr/0014-container-runtime-networking.md)). The
-config-invariant gate enforces the core set on these cells; sev/tdx/windows do **not**
+config-invariant gate enforces the core set on these cells; windows does **not**
 carry it.
 
 - **The `xt` matches an engine's rules need.** Modern container images run
@@ -163,13 +161,12 @@ carry it.
   needs the built-in `xt` modules: `CONFIG_NETFILTER_XT_MATCH_ADDRTYPE` (whose absence
   was the concrete failure — dockerd's bridge driver reporting *"addrtype revision 0
   not supported"*), plus `_STATE`, `_MARK`, `_MULTIPORT`.
-- **Bridge + NAT (both backends).** `CONFIG_BRIDGE` (+`BRIDGE_NETFILTER`) and
-  `CONFIG_VETH` for the container ↔ bridge topology, and both the nft and legacy
-  masquerade/reject paths — `CONFIG_NFT_MASQ`/`NFT_REJECT`,
-  `CONFIG_NETFILTER_XT_TARGET_MASQUERADE`, `CONFIG_IP_NF_TARGET_MASQUERADE`/`_REJECT`
-  (auto-pulling `NF_NAT_MASQUERADE`) — so container outbound traffic is SNAT'd. IPv6 is
-  symmetric (`CONFIG_IP6_NF_IPTABLES` + `IP6_NF_FILTER`/`MANGLE`/`NAT`/
-  `TARGET_MASQUERADE`/`TARGET_REJECT`); Docker configures ip6tables by default.
+- **Bridge + NAT through nftables.** `CONFIG_BRIDGE` (+`BRIDGE_NETFILTER`) and
+  `CONFIG_VETH` provide the container topology; `NFT_MASQ`, `NFT_REJECT`,
+  `NFT_NAT`, and `NF_NAT` provide SNAT/reject behavior. The `xt` matches and
+  targets used by `NFT_COMPAT` remain built in, but Linux's separately selectable
+  legacy IPv4/IPv6 iptables evaluators are disabled and forbidden. Modern
+  `iptables-nft` therefore works without carrying two rule engines.
 - **Network drivers.** `CONFIG_VXLAN` (overlay networks), `CONFIG_MACVLAN`,
   `CONFIG_IPVLAN`, `CONFIG_BRIDGE_VLAN_FILTERING`, plus the nft bridge/ebtables path
   (`CONFIG_NF_TABLES_BRIDGE`, `CONFIG_NF_TABLES_NETDEV`, `CONFIG_BRIDGE_NF_EBTABLES`).

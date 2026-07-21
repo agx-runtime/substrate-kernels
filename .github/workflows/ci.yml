@@ -43,17 +43,16 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # base validates patches/; sev validates that patches-tee/ applies on top.
-        variant: [base, sev]
+        kernel_line: ["6.12", "6.18"]
     steps:
       - uses: actions/checkout@v6
       - name: Cache the pinned kernel tarball
         uses: actions/cache@v5
         with:
           path: tarballs
-          key: kernel-tarball-${{ hashFiles('scripts/kernel-pin.env') }}
+          key: kernel-tarball-${{ matrix.kernel_line }}-${{ hashFiles('scripts/kernel-pins/*.env') }}
       - name: Apply the series (zero fuzz)
-        run: make applies-clean VARIANT=${{ matrix.variant }} ARCH=x86_64
+        run: make applies-clean KERNEL_LINE=${{ matrix.kernel_line }} VARIANT=base ARCH=x86_64
 
   # ---- config-invariant: olddefconfig + required/forbidden per cell (ADR 0006) --
   config:
@@ -61,10 +60,14 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { arch: x86_64, rarch: amd64, variant: base }
-          - { arch: x86_64, rarch: amd64, variant: debug }
-          - { arch: aarch64, rarch: arm64, variant: base }
-          - { arch: aarch64, rarch: arm64, variant: debug }
+          - { kernel_line: "6.12", arch: x86_64, rarch: amd64, variant: base }
+          - { kernel_line: "6.12", arch: x86_64, rarch: amd64, variant: debug }
+          - { kernel_line: "6.12", arch: aarch64, rarch: arm64, variant: base }
+          - { kernel_line: "6.12", arch: aarch64, rarch: arm64, variant: debug }
+          - { kernel_line: "6.18", arch: x86_64, rarch: amd64, variant: base }
+          - { kernel_line: "6.18", arch: x86_64, rarch: amd64, variant: debug }
+          - { kernel_line: "6.18", arch: aarch64, rarch: arm64, variant: base }
+          - { kernel_line: "6.18", arch: aarch64, rarch: arm64, variant: debug }
     runs-on:
       - nscloud-ubuntu-24.04-${{ matrix.rarch }}-8x16-with-cache;github.run-id=${{ github.run_id }}
       - nscloud-cache-size-50gb
@@ -77,13 +80,13 @@ jobs:
         uses: actions/cache@v5
         with:
           path: tarballs
-          key: kernel-tarball-${{ hashFiles('scripts/kernel-pin.env') }}
+          key: kernel-tarball-${{ matrix.kernel_line }}-${{ hashFiles('scripts/kernel-pins/*.env') }}
       - name: Build the pinned toolchain container
         run: docker build -t substrate-kernels-build tools/build
       - name: configure (olddefconfig + config-invariant), no compile
         run: |
           docker run --rm -v "$PWD":/work -w /work substrate-kernels-build \
-            make configured ARCH=${{ matrix.arch }} VARIANT=${{ matrix.variant }}
+            make configured KERNEL_LINE=${{ matrix.kernel_line }} ARCH=${{ matrix.arch }} VARIANT=${{ matrix.variant }}
 
   # ---- full build → the .kernel bundle ------------------------------------------
   build:
@@ -91,10 +94,14 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { arch: x86_64, rarch: amd64, variant: base }
-          - { arch: x86_64, rarch: amd64, variant: debug }
-          - { arch: aarch64, rarch: arm64, variant: base }
-          - { arch: aarch64, rarch: arm64, variant: debug }
+          - { kernel_line: "6.12", arch: x86_64, rarch: amd64, variant: base }
+          - { kernel_line: "6.12", arch: x86_64, rarch: amd64, variant: debug }
+          - { kernel_line: "6.12", arch: aarch64, rarch: arm64, variant: base }
+          - { kernel_line: "6.12", arch: aarch64, rarch: arm64, variant: debug }
+          - { kernel_line: "6.18", arch: x86_64, rarch: amd64, variant: base }
+          - { kernel_line: "6.18", arch: x86_64, rarch: amd64, variant: debug }
+          - { kernel_line: "6.18", arch: aarch64, rarch: arm64, variant: base }
+          - { kernel_line: "6.18", arch: aarch64, rarch: arm64, variant: debug }
     runs-on:
       - nscloud-ubuntu-24.04-${{ matrix.rarch }}-8x16-with-cache;github.run-id=${{ github.run_id }}
       - nscloud-cache-size-50gb
@@ -107,23 +114,23 @@ jobs:
         uses: actions/cache@v5
         with:
           path: tarballs
-          key: kernel-tarball-${{ hashFiles('scripts/kernel-pin.env') }}
+          key: kernel-tarball-${{ matrix.kernel_line }}-${{ hashFiles('scripts/kernel-pins/*.env') }}
       - name: Build the pinned toolchain container
         run: docker build -t substrate-kernels-build tools/build
       - name: Build the bundle (compile + pack) in the pinned container
         run: |
           docker run --rm -v "$PWD":/work -w /work substrate-kernels-build \
-            make all ARCH=${{ matrix.arch }} VARIANT=${{ matrix.variant }}
+            make all KERNEL_LINE=${{ matrix.kernel_line }} ARCH=${{ matrix.arch }} VARIANT=${{ matrix.variant }}
       - name: Stage the kernel binary for the boot-smoke lane
         run: |
           if [ "${{ matrix.arch }}" = "x86_64" ]; then
-            cp build/${{ matrix.variant }}-x86_64/linux-*/vmlinux kernel-binary
+            cp build/linux-*-${{ matrix.variant }}-x86_64/linux-*/vmlinux kernel-binary
           else
-            cp build/${{ matrix.variant }}-aarch64/linux-*/arch/arm64/boot/Image kernel-binary
+            cp build/linux-*-${{ matrix.variant }}-aarch64/linux-*/arch/arm64/boot/Image kernel-binary
           fi
       - uses: actions/upload-artifact@v7
         with:
-          name: bundle-${{ matrix.variant }}-${{ matrix.arch }}
+          name: bundle-${{ matrix.kernel_line }}-${{ matrix.variant }}-${{ matrix.arch }}
           path: |
             linux-*-${{ matrix.variant }}-${{ matrix.arch }}.kernel
             kernel-binary
@@ -140,10 +147,14 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { arch: x86_64, rarch: amd64, variant: base }
-          - { arch: x86_64, rarch: amd64, variant: debug }
-          - { arch: aarch64, rarch: arm64, variant: base }
-          - { arch: aarch64, rarch: arm64, variant: debug }
+          - { kernel_line: "6.12", arch: x86_64, rarch: amd64, variant: base }
+          - { kernel_line: "6.12", arch: x86_64, rarch: amd64, variant: debug }
+          - { kernel_line: "6.12", arch: aarch64, rarch: arm64, variant: base }
+          - { kernel_line: "6.12", arch: aarch64, rarch: arm64, variant: debug }
+          - { kernel_line: "6.18", arch: x86_64, rarch: amd64, variant: base }
+          - { kernel_line: "6.18", arch: x86_64, rarch: amd64, variant: debug }
+          - { kernel_line: "6.18", arch: aarch64, rarch: arm64, variant: base }
+          - { kernel_line: "6.18", arch: aarch64, rarch: arm64, variant: debug }
     runs-on:
       - nscloud-ubuntu-24.04-${{ matrix.rarch }}-8x16-with-cache;github.run-id=${{ github.run_id }}
       - nscloud-cache-size-50gb
@@ -152,7 +163,7 @@ jobs:
       - uses: actions/checkout@v6
       - uses: actions/download-artifact@v8
         with:
-          name: bundle-${{ matrix.variant }}-${{ matrix.arch }}
+          name: bundle-${{ matrix.kernel_line }}-${{ matrix.variant }}-${{ matrix.arch }}
       - name: Install QEMU
         run: sudo apt-get update && sudo apt-get install -y qemu-system-x86 qemu-system-arm
       - name: Boot the kernel under QEMU
@@ -167,10 +178,14 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { arch: x86_64, rarch: amd64, variant: base }
-          - { arch: x86_64, rarch: amd64, variant: debug }
-          - { arch: aarch64, rarch: arm64, variant: base }
-          - { arch: aarch64, rarch: arm64, variant: debug }
+          - { kernel_line: "6.12", arch: x86_64, rarch: amd64, variant: base }
+          - { kernel_line: "6.12", arch: x86_64, rarch: amd64, variant: debug }
+          - { kernel_line: "6.12", arch: aarch64, rarch: arm64, variant: base }
+          - { kernel_line: "6.12", arch: aarch64, rarch: arm64, variant: debug }
+          - { kernel_line: "6.18", arch: x86_64, rarch: amd64, variant: base }
+          - { kernel_line: "6.18", arch: x86_64, rarch: amd64, variant: debug }
+          - { kernel_line: "6.18", arch: aarch64, rarch: arm64, variant: base }
+          - { kernel_line: "6.18", arch: aarch64, rarch: arm64, variant: debug }
     runs-on:
       - nscloud-ubuntu-24.04-${{ matrix.rarch }}-8x16-with-cache;github.run-id=${{ github.run_id }}
       - nscloud-cache-size-50gb
@@ -183,10 +198,10 @@ jobs:
         uses: actions/cache@v5
         with:
           path: tarballs
-          key: kernel-tarball-${{ hashFiles('scripts/kernel-pin.env') }}
+          key: kernel-tarball-${{ matrix.kernel_line }}-${{ hashFiles('scripts/kernel-pins/*.env') }}
       - name: Build the pinned toolchain container
         run: docker build -t substrate-kernels-build tools/build
       - name: Assert byte-identical rebuild
         run: |
           docker run --rm -v "$PWD":/work -w /work substrate-kernels-build \
-            make repro-check ARCH=${{ matrix.arch }} VARIANT=${{ matrix.variant }}
+            make repro-check KERNEL_LINE=${{ matrix.kernel_line }} ARCH=${{ matrix.arch }} VARIANT=${{ matrix.variant }}

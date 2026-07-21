@@ -30,26 +30,30 @@ Two further facts shape the choice:
 
 ## Decision
 
-1. **Pin to a specific point release on a Linux LTS line.** The base is the **6.12
-   LTS** line; the pin is a specific `6.12.x` tag. The choice of line is itself a
-   reviewed decision revisited only when the line approaches end-of-life.
+1. **Support two specific point releases on Linux LTS lines.** `6.12` is the
+   compatibility/default line and `6.18` is the current line. Each selector maps
+   to one exact point release; neither follows a moving branch. Supporting both
+   lets consumers migrate deliberately instead of turning an LTS transition into
+   a flag day.
 
-2. **The pin lives in `scripts/kernel-pin.env`: a version *and* a sha256.** The
+2. **Pins live in `scripts/kernel-pins/<line>.env`: a version *and* a sha256.** The
    build fetches the tarball over HTTPS from kernel.org at the pinned tag and
    **verifies it against the checked-in sha256 before extraction.** A hash
    mismatch fails the build; the source is never trusted on the version string
    alone.
 
-3. **A bump is an explicit, reviewed change to the pin.** Bumping `6.12.x` →
-   `6.12.y` means: update the version + sha256, **re-validate the entire patch
+3. **A bump is an explicit, reviewed change to one pin.** Bumping `6.12.x` →
+   `6.12.y` (or `6.18.x` → `6.18.y`) means: update the version + sha256,
+   **re-validate that line's entire patch
    series applies clean at `-p1` with zero fuzz** (CLAUDE.md §6), re-run
    `olddefconfig` and the config-invariant gate, and re-run boot-smoke. A patch
    that no longer applies is **re-derived, never forced** with fuzz.
 
-4. **A drift lane surfaces the newest point release for opt-in, never adopts it.**
-   `make pin-drift` reports the newest stable `6.12.x` and whether the series still
-   applies against it, so a bump is a visible decision (like substrate's
-   `make uapi-drift`) — not silent staleness and not silent adoption.
+4. **Selection is explicit.** `KERNEL_LINE=6.12` is the default;
+   `KERNEL_LINE=6.18` selects the newer line. Build directories, bundles, and CI
+   artifacts include the chosen exact version so both lines coexist without
+   overwriting one another. A manual release builds and publishes both selections
+   atomically from one exact repository commit.
 
 5. **The pin is the root of every reproducibility claim.** `make repro-check`
    (ADR 0005) is meaningful only because the source is pinned by hash; the two
@@ -63,12 +67,14 @@ Two further facts shape the choice:
   bump that re-validates patches + config + boot — no fix lands unexamined.
 - A version bump carries real work (re-validate the series); this is deliberate
   friction that keeps the patch set honest and small (CLAUDE.md §6).
-- Pinning by line (6.12) rather than by a single frozen tag forever means we have
-  a defined, low-risk path to absorb security fixes without a major rebase.
+- Per-line patch directories make unavoidable source drift visible: a patch is
+  re-derived against each exact tree instead of relying on offset application.
+- Keeping 6.12 and 6.18 concurrently gives substrate a tested compatibility
+  fallback while consumers qualify the newer LTS.
 
 ## Alternatives considered
 
-- **Track a branch (e.g. `linux-6.12.y`) and build tip** — rejected: tip moves, so
+- **Track a branch (e.g. `linux-6.18.y`) and build tip** — rejected: tip moves, so
   no two builds agree and reproducibility is impossible; security fixes would land
   unreviewed and could break the series silently.
 - **Pin only a version string, no hash** — rejected: a version string is not a
@@ -82,3 +88,5 @@ Two further facts shape the choice:
   would break the patch series constantly.
 - **Use the bleeding mainline or a non-LTS line** — same rejection; the guest
   kernel's value is stability + a long fix stream, which is exactly LTS.
+- **Replace 6.12 immediately with 6.18** — rejected for this transition: keeping
+  both exact pins makes compatibility measurable and rollback straightforward.

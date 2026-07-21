@@ -49,13 +49,13 @@ Constraints that shape the format:
    | 4 | 4 | `format_version` | u32, currently `1` |
    | 8 | 4 | `abi_version` | u32, the bundle ABI version |
    | 12 | 4 | `arch` | u32: `1`=x86_64, `2`=aarch64, `3`=riscv64 |
-   | 16 | 4 | `variant` | u32: `0`=base, `1`=sev, `2`=tdx, `3`=windows, `4`=debug |
+   | 16 | 4 | `variant` | u32: `0`=base, `1`/`2`=ABI-reserved, `3`=windows, `4`=debug |
    | 20 | 4 | `page_size` | u32: section alignment in bytes (`65536`, or `4096` for windows) |
    | 24 | 8 | `load_addr` | u64, guest-physical load base of the kernel payload |
    | 32 | 8 | `entry_addr` | u64, guest-physical entry (ADR 0004) |
    | 40 | 8 | `kernel_offset` | u64, file offset of the kernel section |
    | 48 | 8 | `kernel_size` | u64, page-aligned byte length |
-   | 56 | 8 | `qboot_offset` | u64, `0` if absent (TEE only, ADR 0009) |
+   | 56 | 8 | `qboot_offset` | u64, `0` if absent (reserved optional section) |
    | 64 | 8 | `qboot_size` | u64 |
    | 72 | 8 | `initrd_offset` | u64, `0` if absent |
    | 80 | 8 | `initrd_size` | u64 |
@@ -71,9 +71,10 @@ Constraints that shape the format:
    self-describing. This is offset-preserving: a consumer that
    ignores offset 20 is unaffected.
 
-3. **The `qboot` and `initrd` sections are TEE-only.** For base/windows builds their
-   offset/size are `0` (absent). The TEE variants (ADR 0009) carry them. The section
-   name `qboot` is kept as-is (it names a minimal firmware stage).
+3. **The `qboot` and `initrd` fields are retained but absent today.** Every current
+   Makefile-produced bundle sets their offset/size pairs to `0`. They remain in the
+   v1 ABI because removing or repurposing fields would break existing consumers;
+   the removed confidential-compute proposal is recorded in ADR 0009.
 
 4. **The packer flattens per architecture and asserts its own layout.** x86_64:
    flatten the `vmlinux` PT_LOAD segments into one contiguous, page-padded image

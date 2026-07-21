@@ -43,16 +43,16 @@ REQUIRED_COMMON = {
 
 # Arch-specific required additions.
 REQUIRED_ARCH = {
-    "x86_64": {"CONFIG_PVH": "y", "CONFIG_FUSE_DAX": "y", "CONFIG_VIRTIO_RTC": "y",
+    "x86_64": {"CONFIG_PVH": "y",
                # both x86 vendor backends for guest-side KVM
                "CONFIG_KVM_INTEL": "y", "CONFIG_KVM_AMD": "y"},
-    "aarch64": {"CONFIG_FUSE_DAX": "y", "CONFIG_VIRTIO_RTC": "y"},
+    "aarch64": {},
     "riscv64": {},  # carried, not CI-gated; only the common set is asserted
 }
 
 # Variants that boot the substrate guest model directly: must carry XDP_SOCKETS
 # (`AF_XDP`) so guest userspace can attach XDP programs to virtio-net.
-# windows/sev/tdx are carried/special-purpose and out of scope for XDP.
+# windows is carried/special-purpose and out of scope for XDP.
 XDP_VARIANTS = {"base", "debug"}
 
 # Container-runtime networking (in-guest Docker/dockerd — ADR 0014). The variants
@@ -60,7 +60,7 @@ XDP_VARIANTS = {"base", "debug"}
 # container engine needs: iptables-nft goes through nft_compat, which requires the
 # built-in xt matches (ADDRTYPE was the symbol whose absence broke dockerd's bridge
 # driver), and container outbound NAT needs the MASQUERADE targets. Scoped like
-# XDP_VARIANTS; sev/tdx/windows are out of scope. olddefconfig can silently drop any
+# XDP_VARIANTS; windows is out of scope. olddefconfig can silently drop any
 # of these if a dependency changes across a pin bump, so the gate pins them.
 DOCKER_VARIANTS = {"base", "debug"}
 DOCKER_REQUIRED = {
@@ -76,10 +76,7 @@ DOCKER_REQUIRED = {
     "CONFIG_NETFILTER_XT_MATCH_CONNTRACK": "y",
     "CONFIG_NETFILTER_XT_TARGET_MASQUERADE": "y",
     "CONFIG_IP_NF_IPTABLES": "y",
-    "CONFIG_IP_NF_NAT": "y",
-    "CONFIG_IP_NF_TARGET_MASQUERADE": "y",
     "CONFIG_IP6_NF_IPTABLES": "y",     # docker configures ip6tables by default
-    "CONFIG_IP6_NF_NAT": "y",
     "CONFIG_BRIDGE": "y",              # the default docker0 bridge network
     "CONFIG_BRIDGE_NETFILTER": "y",
     "CONFIG_VETH": "y",               # container ↔ bridge veth pairs
@@ -98,16 +95,26 @@ FORBIDDEN_COMMON = {
     "CONFIG_SOUND",            # no sound device in the substrate device set
     "CONFIG_BTRFS_FS",         # rootfs is ext4; snapshotting is the VMM's job
     "CONFIG_FAT_FS",           # no FAT mount path (drops the VFAT/MSDOS/NLS chain)
+    "CONFIG_PCI",              # substrate enumerates virtio-mmio, never PCI
+    "CONFIG_FUSE_DAX",         # substrate's virtio-fs device has no DAX window
+    "CONFIG_VIRTIO_RTC",       # substrate exposes PL031 (arm64) / KVM clock (x86)
+    "CONFIG_ARM64_ACTLR_STATE", # no cross-architecture emulation/Apple TSO contract
+    # Linux 6.18 split the old iptables evaluator from the xtables API used by
+    # iptables-nft. substrate guests use iptables-nft; keep the legacy evaluator
+    # out while retaining NFT_COMPAT and the built-in xt match/target set above.
+    "CONFIG_NETFILTER_XTABLES_LEGACY",
+    "CONFIG_IP_NF_IPTABLES_LEGACY",
+    "CONFIG_IP6_NF_IPTABLES_LEGACY",
 }
 # We enforce only the master toggle of each cut subsystem. Sub-options that depend
 # on the master (e.g. CONFIG_SND_*, CONFIG_BTRFS_FS_*, CONFIG_VFAT_FS,
 # CONFIG_FUNCTION_TRACER) may remain in the .config as harmless orphans after
 # olddefconfig — kbuild compiles them as 'n' because the master is 'n'.
 
-# TEE symbols: forbidden in base/debug/windows, required in sev/tdx.
+# TEE symbols are forbidden: substrate has no SEV/TDX machine model.
 TEE_SYMBOLS = ("CONFIG_SEV_GUEST", "CONFIG_INTEL_TDX_GUEST", "CONFIG_CMDLINE_SECRET")
 
-# Master tracing toggle: forbidden in base/windows/sev/tdx (curated-minimal),
+# Master tracing toggle: forbidden in base/windows (curated-minimal),
 # required in the debug variant (the whole point of that variant).
 TRACING_MASTER = "CONFIG_FTRACE"
 
@@ -134,7 +141,7 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--arch", required=True, choices=("x86_64", "aarch64", "riscv64"))
     p.add_argument("--variant", required=True,
-                   choices=("base", "debug", "sev", "tdx", "windows"))
+                   choices=("base", "debug", "windows"))
     p.add_argument("--config", required=True)
     args = p.parse_args()
 
@@ -172,19 +179,11 @@ def main():
                           f"{name+'='+got if got else 'UNSET'}")
 
     forbidden_enabled = set(FORBIDDEN_COMMON)
-    if args.variant in ("base", "debug", "windows"):
-        # No TEE outside the sev/tdx variants.
-        forbidden_enabled.update(TEE_SYMBOLS)
+    forbidden_enabled.update(TEE_SYMBOLS)
 
     # Master tracing toggle is forbidden everywhere except the debug variant.
     if args.variant != "debug":
         forbidden_enabled.add(TRACING_MASTER)
-
-    if args.variant in ("sev", "tdx"):
-        # sev/tdx: the variant's TEE symbol is required.
-        tee_req = {"sev": "CONFIG_SEV_GUEST", "tdx": "CONFIG_INTEL_TDX_GUEST"}[args.variant]
-        if values.get(tee_req) != "y":
-            errors.append(f"required {tee_req}=y for variant {args.variant}")
 
     for name in forbidden_enabled:
         if values.get(name) in ("y", "m"):
