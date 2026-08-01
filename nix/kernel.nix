@@ -80,17 +80,17 @@ let
             sha256 = pin.KERNEL_SHA256;
         };
 
-    # Unpack the kernel tarball. This replaces the stdenv default because that default lets GNU
-    # tar keep its delay-directory-restore behaviour, which fails on the CI runner's build
-    # filesystem with "Directory renamed before its status could be extracted": tar defers each
-    # directory's metadata to the end of extraction and then finds the directory changed.
-    # --no-delay-directory-restore restores each directory's metadata as it is written, so the
-    # deferral never happens. GNU tar auto-detects the xz compression from the archive's magic, and
-    # the phase cds into the tree itself because overriding unpackPhase skips the stdenv step that
-    # would otherwise enter sourceRoot.
-    unpackKernelPhase = version: ''
+    # Unpack the kernel tarball with bsdtar rather than the stdenv default. GNU tar fails to unpack
+    # the tree on some CI runners' build filesystems with "Directory renamed before its status could
+    # be extracted", a delay-directory-restore error that persisted even with
+    # --no-delay-directory-restore on the amd64 runner. bsdtar from libarchive has no
+    # delay-directory-restore step, so it cannot produce that error, and it extracts the same
+    # archive on every runner; it auto-detects the xz compression from the archive's magic. The phase
+    # cds into the tree itself because overriding unpackPhase skips the stdenv step that would
+    # otherwise enter sourceRoot.
+    unpackKernelPhase = pkgs: version: ''
         runHook preUnpack
-        tar --no-delay-directory-restore -xf "$src"
+        ${pkgs.libarchive}/bin/bsdtar -xf "$src"
         cd "linux-${version}"
         runHook postUnpack
     '';
@@ -137,7 +137,7 @@ in
                 version = pin.KERNEL_VERSION;
 
                 src = fetchSource pkgs pin;
-                unpackPhase = unpackKernelPhase pin.KERNEL_VERSION;
+                unpackPhase = unpackKernelPhase pkgs pin.KERNEL_VERSION;
 
                 nativeBuildInputs =
                     [
@@ -225,7 +225,7 @@ in
             version = pin.KERNEL_VERSION;
 
             src = fetchSource pkgs pin;
-            unpackPhase = unpackKernelPhase pin.KERNEL_VERSION;
+            unpackPhase = unpackKernelPhase pkgs pin.KERNEL_VERSION;
 
             # GNU patch explicitly: the strict zero-fuzz apply below is exactly what BSD patch
             # silently tolerates, so the gate must never fall back to a host `patch`.
@@ -262,7 +262,7 @@ in
             version = pin.KERNEL_VERSION;
 
             src = fetchSource pkgs pin;
-            unpackPhase = unpackKernelPhase pin.KERNEL_VERSION;
+            unpackPhase = unpackKernelPhase pkgs pin.KERNEL_VERSION;
 
             # olddefconfig compiles kconfig's host tools, which is why the gate needs a
             # compiler at all; no target compile happens here.
