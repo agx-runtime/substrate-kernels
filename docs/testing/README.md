@@ -19,7 +19,7 @@ deterministic, no silent skips, root-cause over retry.
 | Does the patch series still apply to the pin? | **applies-clean** | `patch -p1` with zero fuzz; a fuzzed/rejected hunk fails the build ([patches.md](../design/patches.md)) |
 | Did `olddefconfig` drop a required option (or admit a forbidden one)? | **config-invariant** | assert required-present / forbidden-absent per (arch, variant) ([kernel-config.md](../design/kernel-config.md)) |
 | Did the bundle header layout drift? | **bundle-golden** | golden bytes of the header + the alignment/offset invariants ([bundle-golden.md](bundle-golden.md)) |
-| Is the build byte-reproducible across hosts? | **`make repro-check`** | rebuild from the pin in the pinned container; assert byte-identity ([reproducibility.md](../design/reproducibility.md)) |
+| Is the build byte-reproducible? | **`just repro-check`** | `nix build` the cell, then `nix build --rebuild`; a single differing byte fails ([reproducibility.md](../design/reproducibility.md)) |
 | Does a real guest actually boot from the bundle? | **boot-smoke** | a guest boots under substrate on KVM + HVF, reaches userspace, drives the wired devices ([boot-smoke.md](boot-smoke.md)) |
 | Did the image grow / boot slow down? | **budgets** | image size + boot-to-userspace tracked as review signals ([strategy.md](strategy.md)) |
 
@@ -41,12 +41,15 @@ deterministic, no silent skips, root-cause over retry.
 
 - **Per change:** the gates for what you touched — applies-clean + config-invariant
   on a patch/config change; bundle-golden on a packer change.
-- **Per PR:** the full input + artifact gates and boot-smoke on the changed cells.
-- **Periodic / out of band:** the full (arch, variant) matrix, `make repro-check`
-  cross-host, the pin-drift lane ([ADR 0001](../adr/0001-kernel-source-pin-and-update-lifecycle.md)),
-  and the budget trend.
+- **Per PR:** `nix flake check` on both CI architectures (the static gates,
+  applies-clean, and the configured gates), a native build of every CI-gated cell,
+  and a QEMU boot of each built kernel.
+- **On main + manual dispatch:** `just repro-check` per CI-gated cell — the double
+  compile is too slow to run per PR. Out of band: the pin-drift lane
+  ([ADR 0001](../adr/0001-kernel-source-pin-and-update-lifecycle.md)) and the
+  budget trend.
 
-Always run via `make`/CI with `tee`, read the log, and treat a retry as a flake
+Always run via `just`/CI with `tee`, read the log, and treat a retry as a flake
 *signal* to root-cause — never a crutch (CLAUDE.md §9). **Tests panic on missing
-resources** (a missing pin, toolchain image, or substrate fixture is a hard failure
+resources** (a missing pin, tool, or substrate fixture is a hard failure
 with a remediation hint, never a `[skip]`).

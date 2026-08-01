@@ -35,7 +35,8 @@ model and the bundles lacked bootable firmware/initrd wiring
 
 ## 2. Build pipeline
 
-`KERNEL_LINE` selects one exact pin and its independently re-derived patch series:
+The `line` variable (default `6.12`; `just line=6.18 build`) selects one exact pin
+and its independently re-derived patch series:
 
 ```text
 scripts/kernel-pins/<line>.env
@@ -59,9 +60,16 @@ vmlinux (x86_64) or Image (aarch64/riscv64)
 linux-<version>-<variant>-<arch>.kernel
 ```
 
-Build paths contain the exact version, variant, and architecture, so both LTS
-lines coexist. macOS delegates Linux-only stages to the digest-pinned build
-container; Linux may run natively with that toolchain. Details live in
+Every stage runs inside one Nix derivation per (line, variant, guest architecture)
+cell, built by `nix/kernel.nix` in the Nix sandbox on the cell's canonical build
+system: x86_64 and aarch64 natively on their own architecture, riscv64
+cross-compiled from x86_64-linux
+([ADR 0017](adr/0017-nix-build-and-flake-interface.md)). Flake attribute names carry
+the full identity (`kernel-6_12-base-x86_64` — the line's dot becomes an underscore
+because a dot in a `.#` fragment splits the attribute path), so both LTS lines
+coexist as separate derivations. A machine that has run `just cache-login`
+substitutes CI-built cells from the org binary cache; on macOS, a cell the cache
+does not hold compiles in the nix-darwin `linux-builder` VM. Details live in
 [design/build-pipeline.md](design/build-pipeline.md).
 
 ## 3. Components and owners
@@ -71,7 +79,7 @@ container; Linux may run natively with that toolchain. Details live in
 | `scripts/kernel-pins/` | exact version, source URLs, and sha256 per line | pre-extraction hash check |
 | `patches/<line>/` | ordered deltas required by current substrate | strict applies-clean + targeted live behavior |
 | `config-*_<arch>` | monolithic per-cell feature set | `olddefconfig` + config invariants |
-| `tools/build/Dockerfile` | pinned compiler/build environment | clean rebuild byte identity |
+| `flake.nix` + `nix/kernel.nix` | one derivation per cell; the toolchain pinned by `flake.lock` | clean rebuild byte identity |
 | `scripts/pack-kernel.py` | flatten, header, and alignment | unit tests + bundle golden |
 | substrate boot fixture | consume the real bundle and build boot data | KVM boot matrix |
 
@@ -81,7 +89,7 @@ why any Linux divergence exists.
 
 ## 4. Kernel and artifact matrix
 
-Both `KERNEL_LINE=6.12` (6.12.96) and `KERNEL_LINE=6.18` (6.18.39) support the
+Both lines — 6.12 (6.12.96, the `line` default) and 6.18 (6.18.39) — support the
 same matrix:
 
 | Variant | x86_64 | aarch64 | riscv64 |
@@ -90,10 +98,11 @@ same matrix:
 | **debug** | release build; base + tracing/BTF/DWARF5 | release build; same additions | — |
 | **windows** | buildable Hyper-V/WHP cell, 4 KiB packing; not release gated | — | — |
 
-Release CI builds both lines × `{base, debug}` × `{x86_64, aarch64}`. Runtime
-validation boots base on AMD and Intel x86 hosts and an Arm host. Debug shares
-the same patch/config boot contract and additionally runs the byte-reproducibility
-gate ([ADR 0013](adr/0013-debug-variant.md)).
+CI and release both build the eight gated cells: both lines × `{base, debug}` ×
+`{x86_64, aarch64}`. Runtime validation boots base on AMD and Intel x86 hosts and
+an Arm host. Debug shares the same patch/config boot contract
+([ADR 0013](adr/0013-debug-variant.md)), and the reproducibility lane rebuilds
+every gated cell (§6).
 
 ## 5. Current guest capability contract
 
@@ -118,11 +127,16 @@ semantics. No kernel init-death patch is part of the contract.
 
 Static and artifact gates run for every selected cell:
 
-- source sha256 before extraction;
-- zero-fuzz/zero-offset patch application;
-- post-`olddefconfig` required and forbidden symbols;
-- bundle layout/unit goldens;
-- two clean, byte-identical debug rebuilds.
+- Nix verifies the source sha256 before extraction, because the fetch is a
+  fixed-output derivation;
+- the `applies-clean` flake check applies the patch series with zero fuzz and zero
+  offset;
+- the `configured` flake check asserts the required and forbidden symbols after
+  `make olddefconfig`, on the cell's canonical Linux system;
+- the `bundle-golden` and `pack-unit` checks lock the bundle layout and the
+  packer's behavior, and run on every system because they are pure Python;
+- `just repro-check` asserts a byte-identical `nix build --rebuild` per cell; CI
+  runs that lane on pushes to main and on manual dispatch.
 
 The release live gate uses the exact current substrate tree:
 
@@ -151,5 +165,6 @@ thresholds: correctness and an explicit capability contract come first.
 The principal ADRs cover source pins (0001), architecture/variant scope (0002),
 bundle format (0003), substrate boot contract (0004), reproducibility (0005),
 kernel config strategy (0006), patch policy (0007), capability surface (0008),
-superseded confidential-compute variants (0009), debug variant (0013), and
-container networking (0014). The index is [adr/README.md](adr/README.md).
+superseded confidential-compute variants (0009), debug variant (0013), container
+networking (0014), and the Nix build and flake interface (0017). The index is
+[adr/README.md](adr/README.md).

@@ -39,7 +39,8 @@ virtio devices. It is the boundary-tier complement to the input/artifact gates
   release boot targets ([ADR 0002](../adr/0002-target-architectures.md)).
 - **Fixtures are staged, not rebuilt per run:** a substrate build and a rootfs
   (an ext4 disk or initramfs from the OCI pipeline). A missing fixture is a
-  `panic!("[fixture] … — run make <target>")`, never a `[skip]` (CLAUDE.md §9).
+  `panic!("[fixture] …")` whose message names the command that stages it, never a
+  `[skip]` (CLAUDE.md §9).
 - **Observation, not sleeps:** boot success is a real signal — a ready marker on the
   guest console / a vsock handshake — polled with a deadline, never a fixed
   `sleep` (CLAUDE.md §9). Boot-to-userspace time is recorded here for the budget

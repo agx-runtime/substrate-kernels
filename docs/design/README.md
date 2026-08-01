@@ -8,9 +8,9 @@ patch's real precondition. So the discipline mirrors substrate's:
 
 > **Write the design doc → implement.** Before building a component, capture its
 > subtle/security-critical details here — what the contract is, where the
-> hazards are, and how *our* build handles each — and only then write the Makefile
-> target / patch / config / packer code. A built component that lacks its design
-> doc, or whose code diverges from it, is a bug.
+> hazards are, and how *our* build handles each — and only then write the
+> derivation, patch, config, or packer code. A built component that lacks its
+> design doc, or whose code diverges from it, is a bug.
 
 Each doc follows the template: **Background** → **Subtle details & gotchas** (a
 table: *detail · convention · our handling · the locking gate*) → **Our design** →
@@ -20,12 +20,12 @@ table: *detail · convention · our handling · the locking gate*) → **Our des
 
 | Component | Approach | Design doc |
 |---|---|---|
-| The build pipeline | Makefile targets | [build-pipeline.md](build-pipeline.md) |
+| The build pipeline | one Nix derivation per (line, variant, arch) cell | [build-pipeline.md](build-pipeline.md) |
 | The kernel bundle | substrate-native header + packer (`SUBK`) | [bundle-format.md](bundle-format.md) |
 | The kernel config | curated per (arch, variant) | [kernel-config.md](kernel-config.md) |
 | The patch series | ordered, justified series | [patches.md](patches.md) |
 | Initramfs/rootfs handoff | kernel-only bundle; substrate supplies ext4 and optional runtime initramfs | [initramfs.md](initramfs.md) |
-| Reproducibility | pinned container + fixed metadata | [reproducibility.md](reproducibility.md) |
+| Reproducibility | flake.lock-pinned toolchain + Nix sandbox + fixed metadata | [reproducibility.md](reproducibility.md) |
 | The download proxy | CF Worker over R2, with one analytics event per download | [download-proxy.md](download-proxy.md) |
 
 ## Naming ([CLAUDE.md](../../CLAUDE.md) §1)

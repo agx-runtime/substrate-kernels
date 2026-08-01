@@ -99,8 +99,11 @@ against image size and in-guest attack surface.
    `NETFILTER` and `BRIDGE` off entirely; it is enabled to the same target set as the
    x86_64/aarch64 `base` cells (plus `IP_ADVANCED_ROUTER`/`IP_MULTIPLE_TABLES` for
    policy-routing parity). Per [ADR 0002](0002-target-architectures.md) riscv64 is
-   carried but not CI config/build/boot-gated, so this cell is verified locally
-   (`make configured`), not by CI.
+   carried but not build- or boot-gated in CI. Its config gate does run in CI, because
+   the riscv64 cell cross-compiles from x86_64-linux ([ADR 0017](0017-nix-build-and-flake-interface.md))
+   and `nix flake check` on the x86_64-linux runner builds every configured gate whose
+   cell targets that build system; `just configured base riscv64` runs the same gate
+   on a laptop.
 
 6. **No bundle-format or patch change.** This is entirely config
    ([ADR 0006](0006-kernel-config-strategy.md)) — no new patch, no header change; the

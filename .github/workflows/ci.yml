@@ -1,16 +1,15 @@
 name: CI
 
-# Gates for the substrate-kernels build (testing/strategy.md). Modeled on substrate's
-# CI: each gate is its own attributable job. The fast static/apply/config gates run
-# on every PR; the slow lanes (full kernel build, interim QEMU boot, repro-check)
-# run too but are the heavy ones. The Makefile — not this YAML — owns each gate's
-# invocation. CI covers x86_64 + aarch64 only (substrate's hosts); riscv64 and the
-# windows variant are carried but not CI-gated (ADR 0002).
+# Gates for the substrate-kernels build (testing/strategy.md). Each gate is its own
+# attributable job, and every job builds flake outputs — the same derivations a laptop
+# builds — so CI and a developer machine can never run different pipelines (ADR 0017).
 #
-# The Linux build stages run inside the pinned container (tools/build/Dockerfile) so
-# CI uses the same toolchain as a macOS dev host (ADR 0005). The container always
-# cross-compiles via the arch-prefixed toolchain, so both arches build from one
-# runner.
+# Every job authenticates to the org binary cache with its GitHub OIDC token through the
+# cachet-setup action, which also pushes what the job built when it succeeds. That push is
+# what makes a teammate's `just build` a download rather than a forty-minute compile: the
+# store paths CI builds here are the store paths every machine computes from the same
+# commit. CI covers x86_64 + aarch64 (substrate's hosts); riscv64 and the windows variant
+# are carried but not CI-gated (ADR 0002).
 
 on:
   pull_request:
@@ -23,185 +22,133 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
+# id-token lets each job mint the OIDC token cachet accepts for writes; there is no stored
+# cache credential anywhere in this repository (cachet's docs/contracts.md).
 permissions:
   contents: read
+  id-token: write
 
 jobs:
-  # ---- fast static gates (no kernel tree) ---------------------------------------
-  static:
-    runs-on: nscloud-ubuntu-24.04-amd64-2x4
-    steps:
-      - uses: actions/checkout@v6
-      - name: Install pyelftools (the packer's ELF dependency)
-        run: sudo apt-get update && sudo apt-get install -y python3-pyelftools
-      - name: doc-manifest + bundle-golden + pack-unit
-        run: make ci
-
-  # ---- patch series applies clean at -p1 with zero fuzz (ADR 0007) --------------
-  applies-clean:
-    runs-on: nscloud-ubuntu-24.04-amd64-2x4
-    strategy:
-      fail-fast: false
-      matrix:
-        kernel_line: ["6.12", "6.18"]
-    steps:
-      - uses: actions/checkout@v6
-      - name: Cache the pinned kernel tarball
-        uses: actions/cache@v5
-        with:
-          path: tarballs
-          key: kernel-tarball-${{ matrix.kernel_line }}-${{ hashFiles('scripts/kernel-pins/*.env') }}
-      - name: Apply the series (zero fuzz)
-        run: make applies-clean KERNEL_LINE=${{ matrix.kernel_line }} VARIANT=base ARCH=x86_64
-
-  # ---- config-invariant: olddefconfig + required/forbidden per cell (ADR 0006) --
-  config:
+  # ---- every fast gate, per build system -----------------------------------------
+  # `nix flake check` builds the system's whole gate set: doc-manifest, bundle-golden,
+  # pack-unit, applies-clean for both lines, and each configured gate whose cell builds on
+  # this system (olddefconfig + config-invariant, no compile).
+  gates:
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { kernel_line: "6.12", arch: x86_64, rarch: amd64, variant: base }
-          - { kernel_line: "6.12", arch: x86_64, rarch: amd64, variant: debug }
-          - { kernel_line: "6.12", arch: aarch64, rarch: arm64, variant: base }
-          - { kernel_line: "6.12", arch: aarch64, rarch: arm64, variant: debug }
-          - { kernel_line: "6.18", arch: x86_64, rarch: amd64, variant: base }
-          - { kernel_line: "6.18", arch: x86_64, rarch: amd64, variant: debug }
-          - { kernel_line: "6.18", arch: aarch64, rarch: arm64, variant: base }
-          - { kernel_line: "6.18", arch: aarch64, rarch: arm64, variant: debug }
-    runs-on:
-      - nscloud-ubuntu-24.04-${{ matrix.rarch }}-8x16-with-cache;github.run-id=${{ github.run_id }}
-      - nscloud-cache-size-50gb
-      - nscloud-cache-tag-substrate-kernels-${{ matrix.rarch }}
-      - nscloud-container-image-cache
-      - namespace-features:container.privileged=true
+          - { rarch: amd64 }
+          - { rarch: arm64 }
+    runs-on: nscloud-ubuntu-24.04-${{ matrix.rarch }}-8x16
     steps:
       - uses: actions/checkout@v6
-      - name: Cache the pinned kernel tarball
-        uses: actions/cache@v5
+      - uses: agx-runtime/cachet/action@main
         with:
-          path: tarballs
-          key: kernel-tarball-${{ matrix.kernel_line }}-${{ hashFiles('scripts/kernel-pins/*.env') }}
-      - name: Build the pinned toolchain container
-        run: docker build -t substrate-kernels-build tools/build
-      - name: configure (olddefconfig + config-invariant), no compile
-        run: |
-          docker run --rm -v "$PWD":/work -w /work substrate-kernels-build \
-            make configured KERNEL_LINE=${{ matrix.kernel_line }} ARCH=${{ matrix.arch }} VARIANT=${{ matrix.variant }}
+          signing-key: ${{ secrets.CACHET_SIGNING_KEY }}
+      - name: Run every gate for this system
+        run: nix flake check --print-build-logs
 
-  # ---- full build → the .kernel bundle ------------------------------------------
+  # ---- full build → the .kernel bundle -------------------------------------------
+  # One job per CI-gated cell, natively on the cell's own architecture. The cachet-setup
+  # post step pushes the built closure to the cache and, on main, renews the cell's
+  # garbage-collection lease — each cell has its own lease because a lease is replaced
+  # wholesale on renewal, so eight parallel jobs sharing one lease would each erase the
+  # other seven cells' protection.
   build:
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { kernel_line: "6.12", arch: x86_64, rarch: amd64, variant: base }
-          - { kernel_line: "6.12", arch: x86_64, rarch: amd64, variant: debug }
-          - { kernel_line: "6.12", arch: aarch64, rarch: arm64, variant: base }
-          - { kernel_line: "6.12", arch: aarch64, rarch: arm64, variant: debug }
-          - { kernel_line: "6.18", arch: x86_64, rarch: amd64, variant: base }
-          - { kernel_line: "6.18", arch: x86_64, rarch: amd64, variant: debug }
-          - { kernel_line: "6.18", arch: aarch64, rarch: arm64, variant: base }
-          - { kernel_line: "6.18", arch: aarch64, rarch: arm64, variant: debug }
-    runs-on:
-      - nscloud-ubuntu-24.04-${{ matrix.rarch }}-8x16-with-cache;github.run-id=${{ github.run_id }}
-      - nscloud-cache-size-50gb
-      - nscloud-cache-tag-substrate-kernels-${{ matrix.rarch }}
-      - nscloud-container-image-cache
-      - namespace-features:container.privileged=true
+          - { kernel_line: "6.12", line_attr: "6_12", garch: x86_64, rarch: amd64, variant: base }
+          - { kernel_line: "6.12", line_attr: "6_12", garch: x86_64, rarch: amd64, variant: debug }
+          - { kernel_line: "6.12", line_attr: "6_12", garch: aarch64, rarch: arm64, variant: base }
+          - { kernel_line: "6.12", line_attr: "6_12", garch: aarch64, rarch: arm64, variant: debug }
+          - { kernel_line: "6.18", line_attr: "6_18", garch: x86_64, rarch: amd64, variant: base }
+          - { kernel_line: "6.18", line_attr: "6_18", garch: x86_64, rarch: amd64, variant: debug }
+          - { kernel_line: "6.18", line_attr: "6_18", garch: aarch64, rarch: arm64, variant: base }
+          - { kernel_line: "6.18", line_attr: "6_18", garch: aarch64, rarch: arm64, variant: debug }
+    runs-on: nscloud-ubuntu-24.04-${{ matrix.rarch }}-8x16
     steps:
       - uses: actions/checkout@v6
-      - name: Cache the pinned kernel tarball
-        uses: actions/cache@v5
+      - uses: agx-runtime/cachet/action@main
         with:
-          path: tarballs
-          key: kernel-tarball-${{ matrix.kernel_line }}-${{ hashFiles('scripts/kernel-pins/*.env') }}
-      - name: Build the pinned toolchain container
-        run: docker build -t substrate-kernels-build tools/build
-      - name: Build the bundle (compile + pack) in the pinned container
-        run: |
-          docker run --rm -v "$PWD":/work -w /work substrate-kernels-build \
-            make all KERNEL_LINE=${{ matrix.kernel_line }} ARCH=${{ matrix.arch }} VARIANT=${{ matrix.variant }}
-      - name: Stage the kernel binary for the boot-smoke lane
-        run: |
-          if [ "${{ matrix.arch }}" = "x86_64" ]; then
-            cp build/linux-*-${{ matrix.variant }}-x86_64/linux-*/vmlinux kernel-binary
-          else
-            cp build/linux-*-${{ matrix.variant }}-aarch64/linux-*/arch/arm64/boot/Image kernel-binary
-          fi
+          roots: .#kernel-${{ matrix.line_attr }}-${{ matrix.variant }}-${{ matrix.garch }}
+          project: agx-runtime-substrate-kernels-${{ matrix.kernel_line }}-${{ matrix.variant }}-${{ matrix.garch }}
+          signing-key: ${{ secrets.CACHET_SIGNING_KEY }}
+      - name: Build the bundle cell
+        run: nix build --print-build-logs '.#kernel-${{ matrix.line_attr }}-${{ matrix.variant }}-${{ matrix.garch }}'
+      - name: Stage the bundle and the raw kernel binary for the boot-smoke lane
+        run: cp -L result/linux-*.kernel result/kernel-binary .
       - uses: actions/upload-artifact@v7
         with:
-          name: bundle-${{ matrix.kernel_line }}-${{ matrix.variant }}-${{ matrix.arch }}
+          name: bundle-${{ matrix.kernel_line }}-${{ matrix.variant }}-${{ matrix.garch }}
           path: |
-            linux-*-${{ matrix.variant }}-${{ matrix.arch }}.kernel
+            linux-*-${{ matrix.variant }}-${{ matrix.garch }}.kernel
             kernel-binary
           if-no-files-found: error
 
-  # ---- interim QEMU boot (testing/boot-smoke.md) --------------------------------
-  # Real boot-smoke (under substrate) is the cross-repo lane (ADR 0004 §4); this
-  # boots the produced kernel under QEMU — at both 512 MiB and 2048 MiB — and
-  # checks for the kernel banner. QEMU's own -kernel loader places the Image, so
-  # the bundle's load_addr is locked by bundle-golden, not exercised here.
+  # ---- interim QEMU boot (testing/boot-smoke.md) ---------------------------------
+  # Real boot-smoke (under substrate) is the cross-repo lane (ADR 0004 §4); this boots the
+  # produced kernel under QEMU — at both 512 MiB and 2048 MiB — and checks for the kernel
+  # banner. QEMU's own -kernel loader places the Image, so the bundle's load_addr is locked
+  # by bundle-golden, not exercised here. QEMU comes from apt because it is harness tooling
+  # on the runner, never an input to the artifact.
   boot-smoke:
     needs: build
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { kernel_line: "6.12", arch: x86_64, rarch: amd64, variant: base }
-          - { kernel_line: "6.12", arch: x86_64, rarch: amd64, variant: debug }
-          - { kernel_line: "6.12", arch: aarch64, rarch: arm64, variant: base }
-          - { kernel_line: "6.12", arch: aarch64, rarch: arm64, variant: debug }
-          - { kernel_line: "6.18", arch: x86_64, rarch: amd64, variant: base }
-          - { kernel_line: "6.18", arch: x86_64, rarch: amd64, variant: debug }
-          - { kernel_line: "6.18", arch: aarch64, rarch: arm64, variant: base }
-          - { kernel_line: "6.18", arch: aarch64, rarch: arm64, variant: debug }
-    runs-on:
-      - nscloud-ubuntu-24.04-${{ matrix.rarch }}-8x16-with-cache;github.run-id=${{ github.run_id }}
-      - nscloud-cache-size-50gb
-      - nscloud-cache-tag-substrate-kernels-${{ matrix.rarch }}
+          - { kernel_line: "6.12", garch: x86_64, rarch: amd64, variant: base }
+          - { kernel_line: "6.12", garch: x86_64, rarch: amd64, variant: debug }
+          - { kernel_line: "6.12", garch: aarch64, rarch: arm64, variant: base }
+          - { kernel_line: "6.12", garch: aarch64, rarch: arm64, variant: debug }
+          - { kernel_line: "6.18", garch: x86_64, rarch: amd64, variant: base }
+          - { kernel_line: "6.18", garch: x86_64, rarch: amd64, variant: debug }
+          - { kernel_line: "6.18", garch: aarch64, rarch: arm64, variant: base }
+          - { kernel_line: "6.18", garch: aarch64, rarch: arm64, variant: debug }
+    runs-on: nscloud-ubuntu-24.04-${{ matrix.rarch }}-8x16
     steps:
       - uses: actions/checkout@v6
       - uses: actions/download-artifact@v8
         with:
-          name: bundle-${{ matrix.kernel_line }}-${{ matrix.variant }}-${{ matrix.arch }}
+          name: bundle-${{ matrix.kernel_line }}-${{ matrix.variant }}-${{ matrix.garch }}
       - name: Install QEMU
         run: sudo apt-get update && sudo apt-get install -y qemu-system-x86 qemu-system-arm
       - name: Boot the kernel under QEMU
-        run: bash scripts/boot-smoke.sh --arch ${{ matrix.arch }} --kernel kernel-binary --timeout 240
+        run: bash scripts/boot-smoke.sh --arch ${{ matrix.garch }} --kernel kernel-binary --timeout 240
 
-  # ---- reproducibility: byte-identical rebuild (ADR 0005) -----------------------
-  # The double-compile is slow; run on main + manual dispatch (the PR signal comes
-  # from the build lane). Cross-host (macOS) determinism is exercised separately.
+  # ---- reproducibility: byte-identical rebuild (ADR 0005) -------------------------
+  # `nix build` first realizes the cell — usually by substituting what the build lane
+  # already pushed — and `nix build --rebuild` then compiles it locally and fails if a
+  # single byte differs. On a substituted path this therefore also verifies that the cache
+  # serves exactly what this commit's source builds. The double-compile is slow; it runs on
+  # main and manual dispatch, and the PR signal comes from the build lane.
   repro-check:
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { kernel_line: "6.12", arch: x86_64, rarch: amd64, variant: base }
-          - { kernel_line: "6.12", arch: x86_64, rarch: amd64, variant: debug }
-          - { kernel_line: "6.12", arch: aarch64, rarch: arm64, variant: base }
-          - { kernel_line: "6.12", arch: aarch64, rarch: arm64, variant: debug }
-          - { kernel_line: "6.18", arch: x86_64, rarch: amd64, variant: base }
-          - { kernel_line: "6.18", arch: x86_64, rarch: amd64, variant: debug }
-          - { kernel_line: "6.18", arch: aarch64, rarch: arm64, variant: base }
-          - { kernel_line: "6.18", arch: aarch64, rarch: arm64, variant: debug }
-    runs-on:
-      - nscloud-ubuntu-24.04-${{ matrix.rarch }}-8x16-with-cache;github.run-id=${{ github.run_id }}
-      - nscloud-cache-size-50gb
-      - nscloud-cache-tag-substrate-kernels-${{ matrix.rarch }}
-      - nscloud-container-image-cache
-      - namespace-features:container.privileged=true
+          - { line_attr: "6_12", garch: x86_64, rarch: amd64, variant: base }
+          - { line_attr: "6_12", garch: x86_64, rarch: amd64, variant: debug }
+          - { line_attr: "6_12", garch: aarch64, rarch: arm64, variant: base }
+          - { line_attr: "6_12", garch: aarch64, rarch: arm64, variant: debug }
+          - { line_attr: "6_18", garch: x86_64, rarch: amd64, variant: base }
+          - { line_attr: "6_18", garch: x86_64, rarch: amd64, variant: debug }
+          - { line_attr: "6_18", garch: aarch64, rarch: arm64, variant: base }
+          - { line_attr: "6_18", garch: aarch64, rarch: arm64, variant: debug }
+    runs-on: nscloud-ubuntu-24.04-${{ matrix.rarch }}-8x16
     steps:
       - uses: actions/checkout@v6
-      - name: Cache the pinned kernel tarball
-        uses: actions/cache@v5
+      # Read-only: the rebuilt paths are byte-identical to what the build lane already
+      # pushed, so pushing them again would only spend upload time.
+      - uses: agx-runtime/cachet/action@main
         with:
-          path: tarballs
-          key: kernel-tarball-${{ matrix.kernel_line }}-${{ hashFiles('scripts/kernel-pins/*.env') }}
-      - name: Build the pinned toolchain container
-        run: docker build -t substrate-kernels-build tools/build
-      - name: Assert byte-identical rebuild
+          push: "false"
+          signing-key: ${{ secrets.CACHET_SIGNING_KEY }}
+      - name: Assert a byte-identical rebuild
         run: |
-          docker run --rm -v "$PWD":/work -w /work substrate-kernels-build \
-            make repro-check KERNEL_LINE=${{ matrix.kernel_line }} ARCH=${{ matrix.arch }} VARIANT=${{ matrix.variant }}
+          nix build '.#kernel-${{ matrix.line_attr }}-${{ matrix.variant }}-${{ matrix.garch }}'
+          nix build --rebuild --print-build-logs '.#kernel-${{ matrix.line_attr }}-${{ matrix.variant }}-${{ matrix.garch }}'

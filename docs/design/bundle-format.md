@@ -64,7 +64,7 @@ self-contained packer:
 - `--arch {x86_64,aarch64,riscv64} --variant {base,debug,windows}
   --abi-version N --kernel <vmlinux|Image> [--qboot F] [--initrd I] --output <file>`.
   The packer's internal v1 ID map still recognizes the removed `sev`/`tdx` IDs for
-  ABI compatibility, but the Makefile exposes no such build cells.
+  ABI compatibility, but the flake declares no such cells.
 - **x86_64:** parse the ELF, flatten PT_LOAD into a contiguous page-padded image
   (pad gaps, error on overlap), set `load_addr` = first PT_LOAD `p_vaddr & 0xFFFFFFF`
   and `entry_addr` = ELF `e_entry`.
