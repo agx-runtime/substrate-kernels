@@ -80,6 +80,21 @@ let
             sha256 = pin.KERNEL_SHA256;
         };
 
+    # Unpack the kernel tarball. This replaces the stdenv default because that default lets GNU
+    # tar keep its delay-directory-restore behaviour, which fails on the CI runner's build
+    # filesystem with "Directory renamed before its status could be extracted": tar defers each
+    # directory's metadata to the end of extraction and then finds the directory changed.
+    # --no-delay-directory-restore restores each directory's metadata as it is written, so the
+    # deferral never happens. GNU tar auto-detects the xz compression from the archive's magic, and
+    # the phase cds into the tree itself because overriding unpackPhase skips the stdenv step that
+    # would otherwise enter sourceRoot.
+    unpackKernelPhase = version: ''
+        runHook preUnpack
+        tar --no-delay-directory-restore -xf "$src"
+        cd "linux-${version}"
+        runHook postUnpack
+    '';
+
     # The toolchain prefix for a cell. x86_64 and aarch64 cells compile natively on their own
     # build system, so the prefix is empty and kbuild uses the package set's own gcc; the
     # riscv64 cell is carried rather than CI-gated (ADR 0002) and cross-compiles from
@@ -122,7 +137,7 @@ in
                 version = pin.KERNEL_VERSION;
 
                 src = fetchSource pkgs pin;
-                sourceRoot = "linux-${pin.KERNEL_VERSION}";
+                unpackPhase = unpackKernelPhase pin.KERNEL_VERSION;
 
                 nativeBuildInputs =
                     [
@@ -210,7 +225,7 @@ in
             version = pin.KERNEL_VERSION;
 
             src = fetchSource pkgs pin;
-            sourceRoot = "linux-${pin.KERNEL_VERSION}";
+            unpackPhase = unpackKernelPhase pin.KERNEL_VERSION;
 
             # GNU patch explicitly: the strict zero-fuzz apply below is exactly what BSD patch
             # silently tolerates, so the gate must never fall back to a host `patch`.
@@ -247,7 +262,7 @@ in
             version = pin.KERNEL_VERSION;
 
             src = fetchSource pkgs pin;
-            sourceRoot = "linux-${pin.KERNEL_VERSION}";
+            unpackPhase = unpackKernelPhase pin.KERNEL_VERSION;
 
             # olddefconfig compiles kconfig's host tools, which is why the gate needs a
             # compiler at all; no target compile happens here.
