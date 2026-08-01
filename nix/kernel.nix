@@ -101,6 +101,19 @@ let
     # x86_64-linux with the nixpkgs riscv64 cross toolchain.
     crossPrefixOf = pkgs: guestArch: native:
         if native then "" else pkgs.pkgsCross.riscv64.stdenv.cc.targetPrefix;
+
+    # Extra make flags that make the assembler accept the ARMv8 crypto extension on aarch64. The kernel
+    # compiles crypto/aegis128-neon-inner.c with -mcpu=generic+crypto, so gcc generates aese/aesmc, but
+    # arch/arm64/Makefile passes -Wa,-march=armv8.2-a (its asm-arch) to the assembler, and armv8.2-a
+    # omits the crypto extension. gcc normally reconciles the two by emitting an .arch directive; the
+    # nixpkgs toolchain does not, so the assembler rejects the instructions the compiler just emitted.
+    # A trailing -Wa,-march wins, so KCFLAGS and KAFLAGS raise the assembler to armv8.5-a+crypto — a
+    # superset of any asm-arch the config selects, so nothing is downgraded — and the crypto instructions
+    # assemble. Only aarch64 has this per-file crypto flag; x86_64 and riscv64 pass nothing.
+    cryptoAsmFlags = guestArch:
+        if guestArch == "aarch64"
+        then "KCFLAGS=-Wa,-march=armv8.5-a+crypto KAFLAGS=-Wa,-march=armv8.5-a+crypto"
+        else "";
 in
 {
     bundle =
@@ -185,6 +198,7 @@ in
                 buildPhase = ''
                     runHook preBuild
                     make ARCH=${kernelArch} CROSS_COMPILE=${crossPrefix} \
+                        ${cryptoAsmFlags guestArch} \
                         -j"$NIX_BUILD_CORES" ${makeTargetOf.${guestArch}}
                     runHook postBuild
                 '';
