@@ -80,6 +80,26 @@ jobs:
           roots: .#kernel-${{ matrix.line_attr }}-${{ matrix.variant }}-${{ matrix.garch }}
           project: agx-runtime-substrate-kernels-${{ matrix.kernel_line }}-${{ matrix.variant }}-${{ matrix.garch }}
           signing-key: ${{ secrets.CACHET_SIGNING_KEY }}
+      # TEMPORARY diagnostic: the daemon is not substituting from cachet even though cachet holds
+      # the paths, and how the netrc reaches the daemon on this runner is not known. This dumps the
+      # daemon's effective config and tests cachet auth directly, so the fix rests on facts rather
+      # than another guess. Remove once the pull works.
+      - name: debug cachet auth (temporary)
+        if: matrix.line_attr == '6_12' && matrix.garch == 'x86_64' && matrix.variant == 'base'
+        run: |
+          set +e
+          echo "=== systemd present / nix-daemon a service? ==="; command -v systemctl && systemctl is-active nix-daemon; echo "rc=$?"
+          echo "=== daemon process ==="; ps aux | grep -iE 'nix-daemon|determinate-nixd' | grep -v grep
+          echo "=== netrc-file the daemon reads ==="; nf=$(nix config show netrc-file); echo "$nf"
+          echo "=== substituters / extra-substituters ==="; nix config show substituters; nix config show extra-substituters
+          echo "=== trusted-public-keys has cachet? ==="; nix config show trusted-public-keys | tr ' ' '\n' | grep pkg-cache || echo "NO cachet key trusted"
+          echo "=== /etc/determinate/config.json ==="; sudo cat /etc/determinate/config.json 2>&1
+          echo "=== does the synthesized netrc carry the cachet cred? ==="; sudo grep -c pkg-cache "$nf" 2>&1; echo "(reading $nf)"
+          echo "=== our /etc/nix/netrc ==="; sudo grep -c pkg-cache /etc/nix/netrc 2>&1
+          echo "=== direct substituter auth test against cachet ==="
+          nix path-info --store https://pkg-cache.loopholelabs.io /nix/store/h5yfvnkqv0zpij89l4pwviljy6aqwwsq-kernel-bundle-base-x86_64-6.12.96 2>&1 | head -4
+          echo "=== determinate-nixd subcommands ==="; determinate-nixd --help 2>&1 | head -45
+          true
       - name: Build the bundle cell
         run: nix build --print-build-logs '.#kernel-${{ matrix.line_attr }}-${{ matrix.variant }}-${{ matrix.garch }}'
       - name: Stage the bundle and the raw kernel binary for the boot-smoke lane
