@@ -85,7 +85,7 @@ jobs:
       # the whole output directory, so this diffs every file (kernel-binary, the packed .kernel, config)
       # between the cached cross-machine output and a local rebuild, and labels the binary's bytes by
       # section, to name what still moves. Removed once reproducible.
-      - name: diagnose the remaining repro difference (temporary)
+      - name: verify cross-machine reproducibility (temporary)
         if: matrix.line_attr == '6_12' && matrix.garch == 'x86_64' && matrix.variant == 'base'
         run: |
           set +e
@@ -94,16 +94,16 @@ jobs:
           out=$(nix path-info "$cell")
           nix build --rebuild --keep-failed --no-link "$cell" 2>&1 | tail -2
           chk="${out}.check"
-          if [ ! -d "$chk" ]; then echo "REPRODUCED byte-identical"; exit 0; fi
-          echo "=== A (cached, cross-machine) build-ids and their recompute scopes ==="
-          python3 scripts/show-build-ids.py "$out/kernel-binary"
-          echo "=== B (local rebuild) build-ids and their recompute scopes ==="
-          python3 scripts/show-build-ids.py "$chk/kernel-binary"
-          echo "=== convergence: re-normalize copies of A and B, then compare ==="
-          cp "$out/kernel-binary" /tmp/A; cp "$chk/kernel-binary" /tmp/B
-          python3 scripts/normalize-build-id.py /tmp/A /tmp/A >/dev/null
-          python3 scripts/normalize-build-id.py /tmp/B /tmp/B >/dev/null
-          echo "after re-normalizing both, kernel-binary differing bytes: $(cmp -l /tmp/A /tmp/B | wc -l | tr -d ' ')"
+          if [ ! -d "$chk" ]; then echo "REPRODUCED byte-identical (same-machine or cache hit)"; exit 0; fi
+          echo "=== still differs cross-machine; per-file ==="
+          ( cd "$out" && find . -type f | sort | while read -r f; do
+              cmp -s "$out/$f" "$chk/$f" && echo "same:    $f" || echo "DIFFERS: $f"; done )
+          echo "=== base hash of the cached A and rebuilt B (equal base => bodies identical) ==="
+          cp "$out/kernel-binary" /tmp/A; cp "$chk/kernel-binary" /tmp/B; chmod +w /tmp/A /tmp/B
+          NORMALIZE_DEBUG=1 python3 scripts/normalize-build-id.py /tmp/A /tmp/A 2>&1 | grep -a debug
+          NORMALIZE_DEBUG=1 python3 scripts/normalize-build-id.py /tmp/B /tmp/B 2>&1 | grep -a debug
+          echo "=== diff-elf labelling ==="
+          python3 scripts/diff-elf.py "$out/kernel-binary" "$chk/kernel-binary" 2>&1 | grep -vaE '^all differing' | head
           exit 0
       - name: Build the bundle cell
         run: nix build --print-build-logs '.#kernel-${{ matrix.line_attr }}-${{ matrix.variant }}-${{ matrix.garch }}'
