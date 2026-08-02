@@ -95,10 +95,12 @@ jobs:
           nix build --rebuild --keep-failed --no-link "$cell" 2>&1 | tail -2
           mkdir -p capture
           cp -L "$out/kernel-binary" capture/A-kernel-binary
-          cp -L "$out"/*.kernel capture/A.kernel 2>/dev/null
+          cp -L "$out/reprodebug-prenorm" capture/A-prenorm 2>/dev/null
+          cp -L "$out/reprodebug-postnorm" capture/A-postnorm 2>/dev/null
           if [ -d "${out}.check" ]; then
             cp -L "${out}.check/kernel-binary" capture/B-kernel-binary
-            cp -L "${out}.check"/*.kernel capture/B.kernel 2>/dev/null
+            cp -L "${out}.check/reprodebug-prenorm" capture/B-prenorm 2>/dev/null
+            cp -L "${out}.check/reprodebug-postnorm" capture/B-postnorm 2>/dev/null
             echo "captured A ($out) and B (${out}.check); sizes:"
             ls -l capture/
           else

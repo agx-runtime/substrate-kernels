@@ -224,8 +224,10 @@ in
                     # normalized config rides along so a released bundle can be audited without
                     # rebuilding it.
                     install -m 644 ${kernelBinaryOf.${guestArch}} "$out/kernel-binary"
-                    # REPRODEBUG: keep the post-normalize snapshot so it can be diffed against the
-                    # installed binary offline, to see what (if anything) changes after normalize.
+                    # REPRODEBUG: keep the pre- and post-normalize snapshots so they can be diffed
+                    # cross-machine offline. The pre-normalize (ld's) vmlinux is what shows whether the
+                    # original non-determinism is only the build-id or real content elsewhere.
+                    install -m 644 /tmp/reprodebug-prenorm "$out/reprodebug-prenorm"
                     install -m 644 /tmp/reprodebug-postnorm "$out/reprodebug-postnorm"
                     echo "REPRODEBUG installed   $(sha256sum "$out/kernel-binary" | cut -d' ' -f1)"
                     install -m 644 .config "$out/config"
