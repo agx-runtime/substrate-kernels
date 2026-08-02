@@ -80,43 +80,6 @@ jobs:
           roots: .#kernel-${{ matrix.line_attr }}-${{ matrix.variant }}-${{ matrix.garch }}
           project: agx-runtime-substrate-kernels-${{ matrix.kernel_line }}-${{ matrix.variant }}-${{ matrix.garch }}
           signing-key: ${{ secrets.CACHET_SIGNING_KEY }}
-      # TEMPORARY root-cause step: repro-check reports the kernel derivation is non-deterministic, which
-      # a content-trust cache cannot tolerate. This realizes the output, rebuilds it with --keep-failed so
-      # the differing rebuild is kept at <out>.check, then reports which files differ, how many bytes, the
-      # strings that appear in only one side (a leaked path, date, or id is the usual cause), and the hex
-      # around the first difference. Removed once the source of the non-determinism is fixed.
-      - name: root-cause reproducibility (temporary)
-        if: matrix.line_attr == '6_12' && matrix.garch == 'x86_64' && matrix.variant == 'base'
-        run: |
-          set +e
-          out=$(nix build --no-link --print-out-paths '.#kernel-6_12-base-x86_64')
-          echo "content A (realized, from cache if auth works): $out"
-          echo "=== rebuilding to content B, keeping the differing output ==="
-          nix build --rebuild --keep-failed --no-link -L '.#kernel-6_12-base-x86_64' 2>&1 | tail -4
-          check="${out}.check"
-          if [ ! -e "$check" ]; then echo "NO .check output -> reproduced, or the rebuild errored"; ls -ld "${out}"* 2>&1; exit 0; fi
-          echo "=== per-file: same or DIFFERS ==="
-          cd "$out" || exit 0
-          for f in $(find . -type f | sort); do
-            if cmp -s "$out/$f" "$check/$f"; then echo "same:    $f"
-            else echo "DIFFERS: $f  ($(stat -c%s "$out/$f") vs $(stat -c%s "$check/$f") bytes, $(cmp -l "$out/$f" "$check/$f" 2>/dev/null | wc -l | tr -d ' ') differing bytes)"; fi
-          done
-          echo "=== strings present in only one side of each differing file ==="
-          for f in $(find . -type f | sort); do
-            cmp -s "$out/$f" "$check/$f" && continue
-            echo "--- $f: only in A ---"; comm -23 <(strings "$out/$f" | sort -u) <(strings "$check/$f" | sort -u) | head -25
-            echo "--- $f: only in B ---"; comm -13 <(strings "$out/$f" | sort -u) <(strings "$check/$f" | sort -u) | head -25
-          done
-          echo "=== hex around the first difference (first differing file) ==="
-          for f in $(find . -type f | sort); do
-            cmp -s "$out/$f" "$check/$f" && continue
-            off=$(cmp "$out/$f" "$check/$f" 2>&1 | grep -oE 'byte [0-9]+' | grep -oE '[0-9]+' | head -1)
-            echo "$f: first diff at byte $off"; s=$(( off > 48 ? off - 48 : 0 ))
-            echo "A:"; dd if="$out/$f" bs=1 skip=$s count=96 2>/dev/null | od -An -tx1z | head -6
-            echo "B:"; dd if="$check/$f" bs=1 skip=$s count=96 2>/dev/null | od -An -tx1z | head -6
-            break
-          done
-          true
       - name: Build the bundle cell
         run: nix build --print-build-logs '.#kernel-${{ matrix.line_attr }}-${{ matrix.variant }}-${{ matrix.garch }}'
       - name: Stage the bundle and the raw kernel binary for the boot-smoke lane
