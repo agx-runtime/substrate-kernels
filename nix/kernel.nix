@@ -115,6 +115,7 @@ in
             configFile,
             packScript,
             invariantScript,
+            buildIdScript,
             abiVersion ? 1,
         }:
         let
@@ -187,6 +188,21 @@ in
                     make ARCH=${kernelArch} CROSS_COMPILE=${crossPrefix} \
                         -j"$NIX_BUILD_CORES" ${makeTargetOf.${guestArch}}
                     runHook postBuild
+                '';
+
+                # why: ld computes the vmlinux .note.gnu.build-id during the final link, but
+                # sorttable (CONFIG_BUILDTIME_TABLE_SORT) then sorts __ex_table and the other
+                # runtime tables in place afterwards. The pre-sort table order varies from one
+                # build machine to the next while the sorted result does not, so every byte of the
+                # final vmlinux is reproducible except the build-id, which ld hashed over a pre-sort
+                # state the file no longer contains — a repro-check that fails on exactly the
+                # 20-byte build-id (the note and its .rodata copy) with every other byte identical
+                # (ADR 0005). This recomputes the build-id from the final content, after all
+                # post-link processing, so it becomes a function of the deterministic bytes alone.
+                # It runs before the packer and the kernel-binary install, so every artifact those
+                # phases produce carries the reproducible id.
+                postBuild = ''
+                    python3 ${buildIdScript} vmlinux ${kernelBinaryOf.${guestArch}}
                 '';
 
                 installPhase = ''
