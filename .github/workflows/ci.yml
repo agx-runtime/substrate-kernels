@@ -80,6 +80,31 @@ jobs:
           roots: .#kernel-${{ matrix.line_attr }}-${{ matrix.variant }}-${{ matrix.garch }}
           project: agx-runtime-substrate-kernels-${{ matrix.kernel_line }}-${{ matrix.variant }}-${{ matrix.garch }}
           signing-key: ${{ secrets.CACHET_SIGNING_KEY }}
+      # TEMPORARY: the vmlinux GNU build-id is non-deterministic while every other byte is identical, and
+      # the kernel regenerates that build-id fresh on the final link, so this decides whether the cause is
+      # same-machine (a random/time source) or cross-machine (a build-path or environment leak that is
+      # normalized out of the final file). It rebuilds the kernel twice on THIS runner and diffs A (cached,
+      # a different runner) against B, and B against C (both this runner). Removed once the cause is fixed.
+      - name: root-cause build-id determinism (temporary)
+        if: matrix.line_attr == '6_12' && matrix.garch == 'x86_64' && matrix.variant == 'base'
+        run: |
+          set +e
+          nix build --no-link '.#kernel-6_12-base-x86_64'
+          out=$(nix path-info '.#kernel-6_12-base-x86_64')
+          cp "$out/kernel-binary" /tmp/A.vmlinux
+          echo "=== rebuild B on this runner ==="
+          nix build --rebuild --keep-failed --no-link '.#kernel-6_12-base-x86_64' 2>&1 | tail -1
+          cp "${out}.check/kernel-binary" /tmp/B.vmlinux 2>/dev/null; sudo rm -rf "${out}.check"
+          echo "=== rebuild C on this runner ==="
+          nix build --rebuild --keep-failed --no-link '.#kernel-6_12-base-x86_64' 2>&1 | tail -1
+          cp "${out}.check/kernel-binary" /tmp/C.vmlinux 2>/dev/null
+          echo "cross-machine A-vs-B differing bytes: $(cmp -l /tmp/A.vmlinux /tmp/B.vmlinux 2>/dev/null | wc -l | tr -d ' ')"
+          echo "same-machine  B-vs-C differing bytes: $(cmp -l /tmp/B.vmlinux /tmp/C.vmlinux 2>/dev/null | wc -l | tr -d ' ')"
+          echo "=== build-ids ==="
+          for f in A B C; do printf '%s: ' "$f"; nix run nixpkgs#binutils -- readelf -n /tmp/$f.vmlinux 2>/dev/null | grep -i 'build.id' | head -1; done
+          echo "=== build path leaked into B's vmlinux (should be empty) ==="
+          strings /tmp/B.vmlinux | grep -oE '/nix/var/nix/builds/nix-[0-9]+-[0-9]+[a-z0-9/._-]*|/build[a-z0-9/._-]*' | sort -u | head -3
+          true
       - name: Build the bundle cell
         run: nix build --print-build-logs '.#kernel-${{ matrix.line_attr }}-${{ matrix.variant }}-${{ matrix.garch }}'
       - name: Stage the bundle and the raw kernel binary for the boot-smoke lane
