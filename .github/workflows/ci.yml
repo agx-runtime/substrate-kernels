@@ -80,6 +80,33 @@ jobs:
           roots: .#kernel-${{ matrix.line_attr }}-${{ matrix.variant }}-${{ matrix.garch }}
           project: agx-runtime-substrate-kernels-${{ matrix.kernel_line }}-${{ matrix.variant }}-${{ matrix.garch }}
           signing-key: ${{ secrets.CACHET_SIGNING_KEY }}
+      # TEMPORARY: build-id normalization did not make the rebuild byte-identical, and only one build-id
+      # copy exists in the file, so most of the differing bytes are a separate non-determinism that was
+      # never identified. This substitutes the cached cross-machine bundle, rebuilds it locally, and maps
+      # every differing byte to the ELF section it falls in (scripts/diff-sections.py), so the source is
+      # named from data rather than guessed. Removed once the cause is fixed.
+      - name: pinpoint the remaining cross-machine non-determinism (temporary)
+        if: matrix.line_attr == '6_12' && matrix.garch == 'x86_64' && matrix.variant == 'base'
+        run: |
+          set +e
+          cell='.#kernel-6_12-base-x86_64'
+          nix build --no-link "$cell" || { echo "substitute of the cached bundle failed"; exit 0; }
+          out=$(nix path-info "$cell")
+          cp "$out/kernel-binary" /tmp/A
+          echo "=== rebuilding locally to compare against the cached (cross-machine) bundle ==="
+          nix build --rebuild --keep-failed --no-link "$cell" 2>&1 | tail -3
+          if [ ! -e "${out}.check/kernel-binary" ]; then
+            echo "REPRODUCED byte-identical — nothing to diff"; exit 0
+          fi
+          cp "${out}.check/kernel-binary" /tmp/B
+          echo "=== kernel-binary differing bytes: $(cmp -l /tmp/A /tmp/B | wc -l) ==="
+          nix run nixpkgs#binutils -- readelf -SW /tmp/A > /tmp/sections.txt
+          cmp -l /tmp/A /tmp/B > /tmp/diffs.txt
+          python3 scripts/diff-sections.py /tmp/sections.txt /tmp/diffs.txt
+          echo "=== readelf notes A ==="; nix run nixpkgs#binutils -- readelf -n /tmp/A 2>&1 | sed -n '1,20p'
+          echo "=== readelf notes B ==="; nix run nixpkgs#binutils -- readelf -n /tmp/B 2>&1 | sed -n '1,20p'
+          echo "=== packed .kernel bundle differing bytes: $(cmp -l "$out"/*.kernel "${out}.check"/*.kernel 2>/dev/null | wc -l) ==="
+          exit 0
       - name: Build the bundle cell
         run: nix build --print-build-logs '.#kernel-${{ matrix.line_attr }}-${{ matrix.variant }}-${{ matrix.garch }}'
       - name: Stage the bundle and the raw kernel binary for the boot-smoke lane
