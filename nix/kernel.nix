@@ -202,22 +202,32 @@ in
                 # It runs before the packer and the kernel-binary install, so every artifact those
                 # phases produce carries the reproducible id.
                 postBuild = ''
+                    cp ${kernelBinaryOf.${guestArch}} /tmp/reprodebug-prenorm
                     python3 ${buildIdScript} vmlinux ${kernelBinaryOf.${guestArch}}
+                    cp ${kernelBinaryOf.${guestArch}} /tmp/reprodebug-postnorm
+                    echo "REPRODEBUG prenorm  $(sha256sum /tmp/reprodebug-prenorm | cut -d' ' -f1)"
+                    echo "REPRODEBUG postnorm $(sha256sum /tmp/reprodebug-postnorm | cut -d' ' -f1)"
                 '';
 
                 installPhase = ''
                     runHook preInstall
                     mkdir -p "$out"
+                    echo "REPRODEBUG install-start $(sha256sum ${kernelBinaryOf.${guestArch}} | cut -d' ' -f1)"
                     python3 ${packScript} \
                         --arch ${guestArch} \
                         --variant ${variant} \
                         --abi-version ${toString abiVersion} \
                         --kernel ${kernelBinaryOf.${guestArch}} \
                         --output "$out/${bundleFile}"
+                    echo "REPRODEBUG post-pack   $(sha256sum ${kernelBinaryOf.${guestArch}} | cut -d' ' -f1)"
                     # The raw kernel binary rides along for the QEMU boot-smoke lane, and the
                     # normalized config rides along so a released bundle can be audited without
                     # rebuilding it.
                     install -m 644 ${kernelBinaryOf.${guestArch}} "$out/kernel-binary"
+                    # REPRODEBUG: keep the post-normalize snapshot so it can be diffed against the
+                    # installed binary offline, to see what (if anything) changes after normalize.
+                    install -m 644 /tmp/reprodebug-postnorm "$out/reprodebug-postnorm"
+                    echo "REPRODEBUG installed   $(sha256sum "$out/kernel-binary" | cut -d' ' -f1)"
                     install -m 644 .config "$out/config"
                     runHook postInstall
                 '';
