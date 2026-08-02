@@ -99,12 +99,8 @@ jobs:
             echo "REPRODUCED byte-identical — nothing to diff"; exit 0
           fi
           cp "${out}.check/kernel-binary" /tmp/B
-          echo "=== kernel-binary differing bytes: $(cmp -l /tmp/A /tmp/B | wc -l) ==="
-          nix run nixpkgs#binutils -- readelf -SW /tmp/A > /tmp/sections.txt
-          cmp -l /tmp/A /tmp/B > /tmp/diffs.txt
-          python3 scripts/diff-sections.py /tmp/sections.txt /tmp/diffs.txt
-          echo "=== readelf notes A ==="; nix run nixpkgs#binutils -- readelf -n /tmp/A 2>&1 | sed -n '1,20p'
-          echo "=== readelf notes B ==="; nix run nixpkgs#binutils -- readelf -n /tmp/B 2>&1 | sed -n '1,20p'
+          echo "=== labelling every differing byte by vmlinux and embedded-vDSO section ==="
+          python3 scripts/diff-elf.py /tmp/A /tmp/B
           echo "=== packed .kernel bundle differing bytes: $(cmp -l "$out"/*.kernel "${out}.check"/*.kernel 2>/dev/null | wc -l) ==="
           exit 0
       - name: Build the bundle cell
