@@ -431,6 +431,14 @@ reload_daemon() {
             ${SUDO} launchctl kickstart -k "system/${label}" >/dev/null 2>&1 && return 0
         done
     fi
+    # why: a host with neither systemd nor launchd — a CI container is the usual case — restarts the
+    # Determinate daemon through determinate-nixd itself, which regenerates the merged netrc from the
+    # registered sources and reloads. The daemon caches the netrc it reads, so a direct edit to that file
+    # is ignored; only this re-synthesis makes the credential take effect. A stock nix-daemon has no such
+    # subcommand, so it is tried last and only when the two service managers are absent.
+    if command -v determinate-nixd >/dev/null 2>&1; then
+        ${SUDO} determinate-nixd init >/dev/null 2>&1 && return 0
+    fi
     return 1
 }
 
