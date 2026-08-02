@@ -95,19 +95,15 @@ jobs:
           nix build --rebuild --keep-failed --no-link "$cell" 2>&1 | tail -2
           chk="${out}.check"
           if [ ! -d "$chk" ]; then echo "REPRODUCED byte-identical"; exit 0; fi
-          echo "=== per-file diff: cached A ($out) vs rebuild B ($chk) ==="
-          ( cd "$out" && find . -type f | sort | while read -r f; do
-              a="$out/$f"; b="$chk/$f"
-              if [ ! -e "$b" ]; then echo "ONLY-IN-A: $f"
-              elif cmp -s "$a" "$b"; then echo "same:     $f"
-              else echo "DIFFERS:  $f ($(cmp -l "$a" "$b" 2>/dev/null | wc -l | tr -d ' ') bytes)"; fi
-            done )
-          echo "=== diff-elf on kernel-binary ==="
-          python3 scripts/diff-elf.py "$out/kernel-binary" "$chk/kernel-binary" 2>&1 | grep -vaE '^all differing file offsets' | head -20
-          echo "=== first differing bytes of the packed .kernel ==="
-          ka=$(ls "$out"/*.kernel); kb=$(ls "$chk"/*.kernel)
-          cmp -l "$ka" "$kb" 2>/dev/null | head -6
-          echo "(total .kernel differing bytes: $(cmp -l "$ka" "$kb" 2>/dev/null | wc -l | tr -d ' '))"
+          echo "=== A (cached, cross-machine) build-ids and their recompute scopes ==="
+          python3 scripts/show-build-ids.py "$out/kernel-binary"
+          echo "=== B (local rebuild) build-ids and their recompute scopes ==="
+          python3 scripts/show-build-ids.py "$chk/kernel-binary"
+          echo "=== convergence: re-normalize copies of A and B, then compare ==="
+          cp "$out/kernel-binary" /tmp/A; cp "$chk/kernel-binary" /tmp/B
+          python3 scripts/normalize-build-id.py /tmp/A /tmp/A >/dev/null
+          python3 scripts/normalize-build-id.py /tmp/B /tmp/B >/dev/null
+          echo "after re-normalizing both, kernel-binary differing bytes: $(cmp -l /tmp/A /tmp/B | wc -l | tr -d ' ')"
           exit 0
       - name: Build the bundle cell
         run: nix build --print-build-logs '.#kernel-${{ matrix.line_attr }}-${{ matrix.variant }}-${{ matrix.garch }}'
