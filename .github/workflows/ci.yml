@@ -85,7 +85,7 @@ jobs:
       # the whole output directory, so this diffs every file (kernel-binary, the packed .kernel, config)
       # between the cached cross-machine output and a local rebuild, and labels the binary's bytes by
       # section, to name what still moves. Removed once reproducible.
-      - name: verify cross-machine reproducibility (temporary)
+      - name: capture the cached A and the local rebuild B (temporary)
         if: matrix.line_attr == '6_12' && matrix.garch == 'x86_64' && matrix.variant == 'base'
         run: |
           set +e
@@ -93,18 +93,23 @@ jobs:
           nix build --no-link "$cell" || { echo "substitute failed"; exit 0; }
           out=$(nix path-info "$cell")
           nix build --rebuild --keep-failed --no-link "$cell" 2>&1 | tail -2
-          chk="${out}.check"
-          if [ ! -d "$chk" ]; then echo "REPRODUCED byte-identical (same-machine or cache hit)"; exit 0; fi
-          echo "=== still differs cross-machine; per-file ==="
-          ( cd "$out" && find . -type f | sort | while read -r f; do
-              cmp -s "$out/$f" "$chk/$f" && echo "same:    $f" || echo "DIFFERS: $f"; done )
-          echo "=== base hash of the cached A and rebuilt B (equal base => bodies identical) ==="
-          cp "$out/kernel-binary" /tmp/A; cp "$chk/kernel-binary" /tmp/B; chmod +w /tmp/A /tmp/B
-          NORMALIZE_DEBUG=1 python3 scripts/normalize-build-id.py /tmp/A /tmp/A 2>&1 | grep -a debug
-          NORMALIZE_DEBUG=1 python3 scripts/normalize-build-id.py /tmp/B /tmp/B 2>&1 | grep -a debug
-          echo "=== diff-elf labelling ==="
-          python3 scripts/diff-elf.py "$out/kernel-binary" "$chk/kernel-binary" 2>&1 | grep -vaE '^all differing' | head
-          exit 0
+          mkdir -p capture
+          cp -L "$out/kernel-binary" capture/A-kernel-binary
+          cp -L "$out"/*.kernel capture/A.kernel 2>/dev/null
+          if [ -d "${out}.check" ]; then
+            cp -L "${out}.check/kernel-binary" capture/B-kernel-binary
+            cp -L "${out}.check"/*.kernel capture/B.kernel 2>/dev/null
+            echo "captured A ($out) and B (${out}.check); sizes:"
+            ls -l capture/
+          else
+            echo "REPRODUCED (no .check) — nothing to capture"
+          fi
+      - uses: actions/upload-artifact@v7
+        if: matrix.line_attr == '6_12' && matrix.garch == 'x86_64' && matrix.variant == 'base'
+        with:
+          name: repro-capture
+          path: capture/*
+          if-no-files-found: warn
       - name: Build the bundle cell
         run: nix build --print-build-logs '.#kernel-${{ matrix.line_attr }}-${{ matrix.variant }}-${{ matrix.garch }}'
       - name: Stage the bundle and the raw kernel binary for the boot-smoke lane
