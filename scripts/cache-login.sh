@@ -21,11 +21,14 @@
 #
 # Two details are load-bearing and both come from docs/contracts.md:
 #
-#   1. Substitution runs in the nix daemon, so the netrc that matters is the daemon's
-#      (/etc/nix/netrc). A token in ~/.netrc is invisible to it, and the symptom is silent: every
-#      build compiles from source while the cache looks fine.
-#   2. Determinate Nix manages /etc/nix/nix.conf, so `netrc-file` goes in
-#      /etc/nix/nix.custom.conf instead. Anything written into nix.conf would be overwritten on upgrade.
+#   1. Substitution runs in the nix daemon, so the netrc that matters is the daemon's, never a
+#      token in ~/.netrc, which the daemon cannot see. The symptom of writing the wrong file is
+#      silent: every build compiles from source while the cache looks fine.
+#   2. Determinate Nix manages /etc/nix/nix.conf and re-sets `netrc-file` AFTER the line that
+#      includes nix.custom.conf, so a `netrc-file` written into nix.custom.conf never wins and the
+#      daemon keeps reading Determinate's own netrc (commonly /nix/var/determinate/netrc). This
+#      script therefore asks Nix for the effective `netrc-file` with `nix config show` and writes
+#      the credential into whatever file that reports, so it lands where the daemon actually reads.
 #
 # Everything here is idempotent: run it as often as you like, and re-run it after a token rotation.
 set -eu
@@ -56,8 +59,28 @@ USAGE
 
 # Overridable for tests. A test points these at a temporary directory and replaces the privileged
 # command with a recorder, so the exact argv can be asserted without ever needing real root.
+#
+# The credential is written to a file this script owns (/etc/nix/netrc). On Determinate Nix that file
+# is registered as a netrc source rather than named directly, because Determinate manages the netrc
+# the daemon actually reads (the registration step below explains why).
 NETRC_PATH="${CACHET_NETRC_PATH:-/etc/nix/netrc}"
+DETERMINATE_CONFIG="${CACHET_DETERMINATE_CONFIG_PATH:-/etc/determinate/config.json}"
 NIX_CUSTOM_CONF="${CACHET_NIX_CUSTOM_CONF_PATH:-/etc/nix/nix.custom.conf}"
+
+# Determinate Nix (which this project mandates, ADR 0008) synthesizes its own netrc and re-sets
+# `netrc-file` to point at it AFTER including nix.custom.conf, so a `netrc-file` this script writes into
+# nix.custom.conf never wins, and a credential written straight into the synthesized file is wiped on
+# the next daemon restart. determinate-nixd instead merges any file listed under
+# `authentication.additionalNetrcSources` in its config into the synthesized netrc and keeps it across
+# restarts, so on Determinate this script registers the credential file there rather than setting
+# `netrc-file`. A stock Nix has no such daemon and simply reads the file `netrc-file` names.
+if [ -n "${CACHET_DETERMINATE:-}" ]; then
+    is_determinate="${CACHET_DETERMINATE}"
+elif command -v determinate-nixd >/dev/null 2>&1; then
+    is_determinate=1
+else
+    is_determinate=0
+fi
 SUDO="${CACHET_SUDO-sudo}"
 
 # The deployment this authenticates against. Baked in rather than passed, because a copied script has
@@ -230,6 +253,39 @@ install_file() {
     rm -f "${tmp}"
 }
 
+# Register a credential file as a Determinate netrc source. determinate-nixd merges every file listed
+# under `authentication.additionalNetrcSources` into the netrc it synthesizes, and re-does that merge on
+# every daemon restart, so a credential registered here persists — unlike one written straight into the
+# synthesized file, which the next restart wipes (that was the whole bug). The config is JSON: an absent
+# file is created carrying only this source, and an existing one is merged with jq so a garbageCollector
+# or builder section the machine already has is preserved. Without jq an existing config cannot be
+# edited safely, so this stops with instructions rather than risk clobbering those settings.
+register_netrc_source() {
+    reg_source="$1"
+    if [ -e "${DETERMINATE_CONFIG}" ] && ${SUDO} grep -q "\"${reg_source}\"" "${DETERMINATE_CONFIG}" 2>/dev/null; then
+        return 0
+    fi
+    if [ ! -e "${DETERMINATE_CONFIG}" ]; then
+        install_file "${DETERMINATE_CONFIG}" "{
+  \"authentication\": {
+    \"additionalNetrcSources\": [\"${reg_source}\"]
+  }
+}
+" 0644
+        return 0
+    fi
+    if ! command -v jq >/dev/null 2>&1; then
+        echo "cache-login: ${DETERMINATE_CONFIG} already exists and jq is not installed, so this cannot" >&2
+        echo "  add ${reg_source} to authentication.additionalNetrcSources without risking your other" >&2
+        echo "  Determinate settings. Install jq and re-run, or add that path to the file by hand." >&2
+        return 1
+    fi
+    reg_merged="$(${SUDO} cat "${DETERMINATE_CONFIG}" | jq --arg s "${reg_source}" \
+        '.authentication.additionalNetrcSources = ((.authentication.additionalNetrcSources // []) + [$s] | unique)')"
+    install_file "${DETERMINATE_CONFIG}" "${reg_merged}
+" 0644
+}
+
 # Rebuild the netrc with this host's entry replaced. Every other machine's entry is preserved
 # verbatim — a developer may have entries for registries, private flakes, or another cache.
 #
@@ -262,7 +318,14 @@ fi
 # 0600: the netrc holds a credential, and the daemon reads it as root.
 install_file "${NETRC_PATH}" "${netrc_content}" 0600
 
-# Ensure the three settings that make this machine able to use the cache from any project:
+# On Determinate, register the credential file as a netrc source so determinate-nixd folds it into the
+# netrc it synthesizes and keeps it across restarts. On a stock Nix there is no such daemon and the
+# `netrc-file` written below is what the daemon reads instead.
+if [ "${is_determinate}" = "1" ]; then
+    register_netrc_source "${NETRC_PATH}"
+fi
+
+# Ensure the settings that make this machine able to use the cache from any project:
 # `netrc-file` (where the credential is), `extra-substituters` (the cache itself), and
 # `extra-trusted-public-keys` (so a signed NAR from it is trusted).
 #
@@ -318,8 +381,14 @@ conf_without="$(printf '%s\n' "${existing_conf}" |
         -e '/^extra-trusted-public-keys[[:space:]]*=/d' |
     sed '/^[[:space:]]*$/d')"
 
-conf_managed="netrc-file = ${NETRC_PATH}
+# On Determinate the daemon reads its own synthesized netrc, so a `netrc-file` here would be overridden
+# and only mislead a reader; the credential reaches the daemon through the registered source instead.
+if [ "${is_determinate}" = "1" ]; then
+    conf_managed="extra-substituters = ${substituters}"
+else
+    conf_managed="netrc-file = ${NETRC_PATH}
 extra-substituters = ${substituters}"
+fi
 if [ -n "${trusted_keys}" ]; then
     conf_managed="${conf_managed}
 extra-trusted-public-keys = ${trusted_keys}"
