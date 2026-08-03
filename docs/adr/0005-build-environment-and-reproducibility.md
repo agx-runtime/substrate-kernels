@@ -40,7 +40,16 @@ toolchain was pinned by accident of caching rather than by construction.
 2. **The build runs in the Nix sandbox.** No ambient host state — PATH, locale, wall clock
    beyond the fixed metadata, the host's own toolchain — reaches the compile, because the
    sandbox admits only declared inputs. Cross-host identity stops being a discipline and
-   becomes the construction.
+   becomes the construction. The sandbox is load-bearing beyond purity: it builds in a fixed
+   `/build`, whereas an unsandboxed build runs in a per-invocation directory
+   (`/nix/var/nix/builds/nix-<pid>-<rand>`) whose name reaches the GNU build-id that `ld`
+   stamps and `objcopy` then strips, so two unsandboxed builds of byte-identical content stamp
+   different build-ids and repro-check fails on exactly those 20-byte descriptors while every
+   other byte matches. The sandbox needs Linux user namespaces, so the CI runners must be
+   privileged: the Namespace runners carry the `-with-features` and
+   `container.privileged=true` labels for that reason. On an unprivileged runner nix's
+   `sandbox-fallback` silently degrades to an unsandboxed build rather than failing, so the
+   only defence against that regression is repro-check running on every pull request.
 
 3. **Each cell builds on one canonical build system** (ADR 0017): x86_64 and aarch64
    natively on their own architecture, riscv64 cross from x86_64-linux. One canonical system

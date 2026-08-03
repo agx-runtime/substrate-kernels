@@ -143,10 +143,12 @@ jobs:
   # `nix build` first realizes the cell — usually by substituting what the build lane
   # already pushed — and `nix build --rebuild` then compiles it locally and fails if a
   # single byte differs. On a substituted path this therefore also verifies that the cache
-  # serves exactly what this commit's source builds. The double-compile is slow; it runs on
-  # main and manual dispatch, and the PR signal comes from the build lane.
+  # serves exactly what this commit's source builds. It runs on every pull request rather
+  # than only on main: a reproducibility regression that reaches main is one that already
+  # poisoned the cache, and the non-determinism this gate exists to catch (an unsandboxed
+  # build stamping a build-directory-dependent build-id, ADR 0005) was invisible precisely
+  # because this job used to be gated to push and dispatch.
   repro-check:
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     strategy:
       fail-fast: false
       matrix:
@@ -173,30 +175,4 @@ jobs:
       - name: Assert a byte-identical rebuild
         run: |
           nix build '.#kernel-${{ matrix.line_attr }}-${{ matrix.variant }}-${{ matrix.garch }}'
-          nix build --rebuild --keep-failed --print-build-logs '.#kernel-${{ matrix.line_attr }}-${{ matrix.variant }}-${{ matrix.garch }}'
-      # Diagnostic (temporary): on a non-deterministic failure, --keep-failed above retains the
-      # rebuilt output as <out>.check. This step never edits the flake source, runs no new build,
-      # and only copies the already-built store paths into RUNNER_TEMP, so it cannot change what
-      # any build produces (the derivation is untouched).
-      - name: Capture the divergent outputs
-        if: failure()
-        run: |
-          set +e
-          out=$(nix path-info '.#kernel-${{ matrix.line_attr }}-${{ matrix.variant }}-${{ matrix.garch }}')
-          chk="${out}.check"
-          echo "ref=$out"; echo "check=$chk"
-          [ -d "$chk" ] || { echo "no .check kept — failure was not a rebuild divergence"; exit 0; }
-          mkdir -p "$RUNNER_TEMP/divergence"
-          cp -L "$out/kernel-binary" "$RUNNER_TEMP/divergence/ref-kernel-binary"
-          cp -L "$chk/kernel-binary" "$RUNNER_TEMP/divergence/check-kernel-binary"
-          cp -L "$out"/*.kernel "$RUNNER_TEMP/divergence/ref.kernel" 2>/dev/null
-          cp -L "$chk"/*.kernel "$RUNNER_TEMP/divergence/check.kernel" 2>/dev/null
-          echo "diff bytes (kernel-binary): $(cmp -l "$out/kernel-binary" "$chk/kernel-binary" 2>/dev/null | wc -l)"
-          echo "first differing byte offsets (1-based, decimal):"
-          cmp -l "$out/kernel-binary" "$chk/kernel-binary" 2>/dev/null | head -30 | awk '{print $1}'
-      - uses: actions/upload-artifact@v7
-        if: failure()
-        with:
-          name: divergence-${{ matrix.line_attr }}-${{ matrix.garch }}-${{ matrix.variant }}
-          path: ${{ runner.temp }}/divergence/*
-          if-no-files-found: warn
+          nix build --rebuild --print-build-logs '.#kernel-${{ matrix.line_attr }}-${{ matrix.variant }}-${{ matrix.garch }}'
