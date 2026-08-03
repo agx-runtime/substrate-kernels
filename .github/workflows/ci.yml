@@ -97,16 +97,16 @@ jobs:
           project: agx-runtime-substrate-kernels-${{ matrix.kernel_line }}-${{ matrix.variant }}-${{ matrix.garch }}
           signing-key: ${{ secrets.CACHET_SIGNING_KEY }}
       - name: Build the bundle cell
-        # Raw `nix build`, not `nix develop --command just build`, precisely because this is the one job
-        # that pushes. Entering the dev shell to run `just` realizes the dev shell's whole closure into
-        # the store, and the cachet post step pushes every store path that appeared since its snapshot, so
-        # routing the build through `just` dragged roughly 1250 dev-shell paths into the content-addressed
-        # push (the store diff went from 852 paths to 2109, and 432 became new uploads) and stalled the
-        # upload for many minutes. This invokes the exact derivation `just build` wraps, so the build a
-        # laptop runs and the build CI runs stay identical; only the push is held to the kernel closure.
-        # The read-only gates and repro-check keep their `just` verbs, because `push: false` means their
-        # dev shell realization is never uploaded.
-        run: nix build --print-build-logs '.#kernel-${{ matrix.line_attr }}-${{ matrix.variant }}-${{ matrix.garch }}'
+        # `just build` runs the identical `nix build` a laptop runs (ADR 0017). This accepts a one-time
+        # cost on the first run after the dev shell's closure changes: `nix develop` realizes that closure
+        # into the store, and the cachet post step pushes every path new since its snapshot, so that run
+        # uploads the dev shell too and its post step runs for many minutes rather than seconds (the same
+        # order as the first push of a debug kernel, which earlier runs show completing in nine to ten).
+        # Every run afterwards finds those paths already in cachet and returns to a few seconds, because
+        # the objects are content-addressed and the dev shell changes only when flake.lock does. Pushing
+        # the dev shell is worth having on its own: a teammate's `nix develop` then substitutes it rather
+        # than building it from source.
+        run: nix develop --command just line=${{ matrix.kernel_line }} build ${{ matrix.variant }} ${{ matrix.garch }}
       - name: Stage the bundle and the raw kernel binary for the boot-smoke lane
         run: cp -L result/linux-*.kernel result/kernel-binary .
       - uses: actions/upload-artifact@v7
