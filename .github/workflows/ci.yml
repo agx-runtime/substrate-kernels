@@ -85,9 +85,11 @@ jobs:
         run: |
           set +e
           cell='.#kernel-6_12-base-x86_64'
-          nix build --no-link "$cell" || { echo "substitute failed"; exit 0; }
+          echo "=== A build (first) install phase ==="
+          nix build -L --no-link "$cell" 2>&1 | grep -aE 'REPRODEBUG|normalize-build-id|Running phase: (install|fixup)|wrote /nix/store' | tail -12
           out=$(nix path-info "$cell")
-          nix build --rebuild --keep-failed --no-link "$cell" 2>&1 | tail -2
+          echo "=== B build (--rebuild) install phase ==="
+          nix build -L --rebuild --keep-failed --no-link "$cell" 2>&1 | grep -aE 'REPRODEBUG|normalize-build-id|Running phase: (install|fixup)|wrote /nix/store|may not be deterministic' | tail -14
           chk="${out}.check"
           [ -d "$chk" ] || { echo "REPRODUCED"; exit 0; }
           for f in kernel-binary config; do echo "diff $f: $(cmp -l "$out/$f" "$chk/$f" 2>/dev/null | wc -l | tr -d ' ') bytes"; done
