@@ -190,36 +190,35 @@ in
                     runHook postBuild
                 '';
 
-                # why: ld computes each `--build-id=sha1` over the object it has just linked, and later
-                # stages rewrite that object in place (sorttable reorders __ex_table in the vmlinux;
-                # objcopy strips each vDSO's debug sections before it is embedded as a raw_data[] array),
-                # so the build-id hashes bytes the finished file no longer contains. Diffing ld's raw
-                # vmlinux from two build machines confirmed the consequence exactly: they differ in the
-                # two 20-byte GNU build-id descriptors (the main .note.gnu.build-id and the embedded
-                # vDSO's) and in nothing else, so the build-id is the only thing that breaks a
-                # byte-identical rebuild (ADR 0005). normalize-build-id.py recomputes each descriptor from
-                # the final content so it is a function of the deterministic bytes alone. It runs before
-                # the packer and the kernel-binary install so every artifact carries the reproducible id,
-                # and it waits for the vmlinux to stop changing before hashing it, because reading the file
-                # while this phase races the kernel build's own late writes was what left the id
-                # machine-specific in the first place.
-                postBuild = ''
-                    NORMALIZE_DEBUG=1 python3 ${buildIdScript} vmlinux ${kernelBinaryOf.${guestArch}}
-                '';
-
                 installPhase = ''
                     runHook preInstall
                     mkdir -p "$out"
+
+                    # Install the kernel binary first, then normalize the build-ids on the INSTALLED copy
+                    # rather than on the build-tree file.
+                    #
+                    # why: ld computes each `--build-id=sha1` over the object it has just linked, before
+                    # sorttable reorders __ex_table and objcopy strips each embedded vDSO's debug sections,
+                    # so the id hashes bytes the finished file no longer contains and differs across build
+                    # machines. normalize-build-id.py recomputes each descriptor as a hash of the file's own
+                    # content so it becomes a function of the deterministic bytes alone (ADR 0005). The
+                    # subtlety this ordering fixes: run against the build-tree vmlinux, normalize on some
+                    # machines hashed a state that did not match the bytes finally shipped, stamping a
+                    # build-id that failed the rebuild check even though the installed content was identical
+                    # across machines (verified by diffing two machines' outputs: only the build-id
+                    # descriptors differed, and the installed body hashed the same on both). The installed
+                    # file is the settled artifact, so normalizing it makes the id a function of exactly what
+                    # ships, and the packer then reads that normalized binary so the bundle carries the same
+                    # id. The normalized config rides along so a released bundle can be audited without a
+                    # rebuild.
+                    install -m 644 ${kernelBinaryOf.${guestArch}} "$out/kernel-binary"
+                    python3 ${buildIdScript} "$out/kernel-binary"
                     python3 ${packScript} \
                         --arch ${guestArch} \
                         --variant ${variant} \
                         --abi-version ${toString abiVersion} \
-                        --kernel ${kernelBinaryOf.${guestArch}} \
+                        --kernel "$out/kernel-binary" \
                         --output "$out/${bundleFile}"
-                    # The raw kernel binary rides along for the QEMU boot-smoke lane, and the
-                    # normalized config rides along so a released bundle can be audited without
-                    # rebuilding it.
-                    install -m 644 ${kernelBinaryOf.${guestArch}} "$out/kernel-binary"
                     install -m 644 .config "$out/config"
                     runHook postInstall
                 '';

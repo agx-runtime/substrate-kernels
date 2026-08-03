@@ -79,7 +79,7 @@ def main():
         old = bytes(vmlinux[d:d + BUILD_ID_LEN])
         vmlinux[d:d + BUILD_ID_LEN] = new
         mapping[old] = new
-        print(f"normalize-build-id: build-id @0x{d:x} old={old.hex()} -> {new.hex()}")
+        print(f"normalize-build-id: build-id @0x{d:x} -> {new.hex()}")
 
     with open(vmlinux_path, "wb") as f:
         f.write(vmlinux)

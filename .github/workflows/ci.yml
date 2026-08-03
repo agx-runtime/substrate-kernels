@@ -80,40 +80,6 @@ jobs:
           roots: .#kernel-${{ matrix.line_attr }}-${{ matrix.variant }}-${{ matrix.garch }}
           project: agx-runtime-substrate-kernels-${{ matrix.kernel_line }}-${{ matrix.variant }}-${{ matrix.garch }}
           signing-key: ${{ secrets.CACHET_SIGNING_KEY }}
-      # TEMPORARY: the build-ids are now normalized in the cached output (verified) yet repro-check still
-      # fails, so a remaining difference is somewhere other than the two build-ids. repro-check compares
-      # the whole output directory, so this diffs every file (kernel-binary, the packed .kernel, config)
-      # between the cached cross-machine output and a local rebuild, and labels the binary's bytes by
-      # section, to name what still moves. Removed once reproducible.
-      - name: capture the cached A and the local rebuild B (temporary)
-        if: matrix.line_attr == '6_12' && matrix.garch == 'x86_64' && matrix.variant == 'base'
-        run: |
-          set +e
-          cell='.#kernel-6_12-base-x86_64'
-          echo "=== A build normalize (first build on this machine) ==="
-          nix build -L --no-link "$cell" 2>&1 | grep -aE 'normalize-build-id' || echo "(A already in store; not rebuilt)"
-          out=$(nix path-info "$cell")
-          echo "=== B build normalize (rebuild on the same machine) ==="
-          nix build -L --rebuild --keep-failed --no-link "$cell" 2>&1 | grep -aE 'normalize-build-id|may not be deterministic'
-          mkdir -p capture
-          cp -L "$out/kernel-binary" capture/A-kernel-binary
-          cp -L "$out/reprodebug-prenorm" capture/A-prenorm 2>/dev/null
-          cp -L "$out/reprodebug-postnorm" capture/A-postnorm 2>/dev/null
-          if [ -d "${out}.check" ]; then
-            cp -L "${out}.check/kernel-binary" capture/B-kernel-binary
-            cp -L "${out}.check/reprodebug-prenorm" capture/B-prenorm 2>/dev/null
-            cp -L "${out}.check/reprodebug-postnorm" capture/B-postnorm 2>/dev/null
-            echo "captured A ($out) and B (${out}.check); sizes:"
-            ls -l capture/
-          else
-            echo "REPRODUCED (no .check) — nothing to capture"
-          fi
-      - uses: actions/upload-artifact@v7
-        if: matrix.line_attr == '6_12' && matrix.garch == 'x86_64' && matrix.variant == 'base'
-        with:
-          name: repro-capture
-          path: capture/*
-          if-no-files-found: warn
       - name: Build the bundle cell
         run: nix build --print-build-logs '.#kernel-${{ matrix.line_attr }}-${{ matrix.variant }}-${{ matrix.garch }}'
       - name: Stage the bundle and the raw kernel binary for the boot-smoke lane
