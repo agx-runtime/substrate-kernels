@@ -97,9 +97,16 @@ jobs:
           project: agx-runtime-substrate-kernels-${{ matrix.kernel_line }}-${{ matrix.variant }}-${{ matrix.garch }}
           signing-key: ${{ secrets.CACHET_SIGNING_KEY }}
       - name: Build the bundle cell
-        # `just build` runs the identical `nix build` a laptop runs (ADR 0017); the `line=` setting
-        # and the two positional arguments are the same interface `just build` exposes to a developer.
-        run: nix develop --command just line=${{ matrix.kernel_line }} build ${{ matrix.variant }} ${{ matrix.garch }}
+        # Raw `nix build`, not `nix develop --command just build`, precisely because this is the one job
+        # that pushes. Entering the dev shell to run `just` realizes the dev shell's whole closure into
+        # the store, and the cachet post step pushes every store path that appeared since its snapshot, so
+        # routing the build through `just` dragged roughly 1250 dev-shell paths into the content-addressed
+        # push (the store diff went from 852 paths to 2109, and 432 became new uploads) and stalled the
+        # upload for many minutes. This invokes the exact derivation `just build` wraps, so the build a
+        # laptop runs and the build CI runs stay identical; only the push is held to the kernel closure.
+        # The read-only gates and repro-check keep their `just` verbs, because `push: false` means their
+        # dev shell realization is never uploaded.
+        run: nix build --print-build-logs '.#kernel-${{ matrix.line_attr }}-${{ matrix.variant }}-${{ matrix.garch }}'
       - name: Stage the bundle and the raw kernel binary for the boot-smoke lane
         run: cp -L result/linux-*.kernel result/kernel-binary .
       - uses: actions/upload-artifact@v7
