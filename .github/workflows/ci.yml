@@ -63,7 +63,9 @@ jobs:
           signing-key: ${{ secrets.CACHET_SIGNING_KEY }}
           push: 'false'
       - name: Run every gate for this system
-        run: nix flake check --print-build-logs
+        # The same verb a laptop runs, so CI and a developer machine cannot drift (ADR 0017).
+        # `just` comes from the dev shell, so every verb is invoked through `nix develop --command`.
+        run: nix develop --command just ci
 
   # ---- full build → the .kernel bundle -------------------------------------------
   # One job per CI-gated cell, natively on the cell's own architecture. The cachet-setup
@@ -95,7 +97,9 @@ jobs:
           project: agx-runtime-substrate-kernels-${{ matrix.kernel_line }}-${{ matrix.variant }}-${{ matrix.garch }}
           signing-key: ${{ secrets.CACHET_SIGNING_KEY }}
       - name: Build the bundle cell
-        run: nix build --print-build-logs '.#kernel-${{ matrix.line_attr }}-${{ matrix.variant }}-${{ matrix.garch }}'
+        # `just build` runs the identical `nix build` a laptop runs (ADR 0017); the `line=` setting
+        # and the two positional arguments are the same interface `just build` exposes to a developer.
+        run: nix develop --command just line=${{ matrix.kernel_line }} build ${{ matrix.variant }} ${{ matrix.garch }}
       - name: Stage the bundle and the raw kernel binary for the boot-smoke lane
         run: cp -L result/linux-*.kernel result/kernel-binary .
       - uses: actions/upload-artifact@v7
@@ -140,27 +144,32 @@ jobs:
         run: bash scripts/boot-smoke.sh --arch ${{ matrix.garch }} --kernel kernel-binary --timeout 240
 
   # ---- reproducibility: byte-identical rebuild (ADR 0005) -------------------------
-  # `nix build` first realizes the cell — usually by substituting what the build lane
-  # already pushed — and `nix build --rebuild` then compiles it locally and fails if a
-  # single byte differs. On a substituted path this therefore also verifies that the cache
-  # serves exactly what this commit's source builds. It runs on every pull request rather
-  # than only on main: a reproducibility regression that reaches main is one that already
-  # poisoned the cache, and the non-determinism this gate exists to catch (an unsandboxed
-  # build stamping a build-directory-dependent build-id, ADR 0005) was invisible precisely
-  # because this job used to be gated to push and dispatch.
+  # `just repro-check` realizes the cell — usually by substituting what the build lane already
+  # pushed — and then rebuilds it with `nix build --rebuild`, failing if a single byte differs; on
+  # a substituted path this also verifies the cache serves exactly what this commit's source
+  # builds. It runs on pushes to main and on manual dispatch, not on every pull request, because
+  # each cell is a full from-scratch kernel compile and rebuilding all eight on every PR push is
+  # hours of compute that duplicates the build lane's own work on the same commit. The cost this
+  # gating accepts is that a reproducibility regression is caught after it merges rather than
+  # before, and in the window between main's build lane pushing an artifact and this job failing,
+  # the cache serves the first-built bytes. The weekly reproducibility verifier is the continuous
+  # cross-machine backstop that catches such a regression regardless of this gate, and
+  # workflow_dispatch is the escape hatch to check a build-affecting change on a branch before it
+  # merges (ADR 0005).
   repro-check:
+    if: github.event_name != 'pull_request'
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { line_attr: "6_12", garch: x86_64, rarch: amd64, variant: base }
-          - { line_attr: "6_12", garch: x86_64, rarch: amd64, variant: debug }
-          - { line_attr: "6_12", garch: aarch64, rarch: arm64, variant: base }
-          - { line_attr: "6_12", garch: aarch64, rarch: arm64, variant: debug }
-          - { line_attr: "6_18", garch: x86_64, rarch: amd64, variant: base }
-          - { line_attr: "6_18", garch: x86_64, rarch: amd64, variant: debug }
-          - { line_attr: "6_18", garch: aarch64, rarch: arm64, variant: base }
-          - { line_attr: "6_18", garch: aarch64, rarch: arm64, variant: debug }
+          - { kernel_line: "6.12", garch: x86_64, rarch: amd64, variant: base }
+          - { kernel_line: "6.12", garch: x86_64, rarch: amd64, variant: debug }
+          - { kernel_line: "6.12", garch: aarch64, rarch: arm64, variant: base }
+          - { kernel_line: "6.12", garch: aarch64, rarch: arm64, variant: debug }
+          - { kernel_line: "6.18", garch: x86_64, rarch: amd64, variant: base }
+          - { kernel_line: "6.18", garch: x86_64, rarch: amd64, variant: debug }
+          - { kernel_line: "6.18", garch: aarch64, rarch: arm64, variant: base }
+          - { kernel_line: "6.18", garch: aarch64, rarch: arm64, variant: debug }
     runs-on:
       - nscloud-ubuntu-24.04-${{ matrix.rarch }}-8x16-with-features
       - namespace-features:container.privileged=true
@@ -173,6 +182,6 @@ jobs:
           push: "false"
           signing-key: ${{ secrets.CACHET_SIGNING_KEY }}
       - name: Assert a byte-identical rebuild
-        run: |
-          nix build '.#kernel-${{ matrix.line_attr }}-${{ matrix.variant }}-${{ matrix.garch }}'
-          nix build --rebuild --print-build-logs '.#kernel-${{ matrix.line_attr }}-${{ matrix.variant }}-${{ matrix.garch }}'
+        # The same verb a laptop runs (ADR 0017): `just repro-check` is `nix build` followed by
+        # `nix build --rebuild` on this cell.
+        run: nix develop --command just line=${{ matrix.kernel_line }} repro-check ${{ matrix.variant }} ${{ matrix.garch }}
