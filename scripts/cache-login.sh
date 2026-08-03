@@ -198,6 +198,21 @@ else
         echo "  or pass the token directly with --token-stdin." >&2
         exit 1
     fi
+    # Log in first when this machine has no Infisical session. `infisical secrets get` on a
+    # logged-out machine fails with an error about the API rather than about login, and the fix —
+    # running `infisical login` — is a step a copied script cannot assume the reader knows to take, so
+    # this triggers it for them. `infisical user get token` reports the session: it prints the login
+    # token the CLI saved at login and prints nothing when no user is logged in, and it reads that saved
+    # token locally rather than calling the API, so it answers "is this machine logged in" even when the
+    # network is down — which is the case that matters, because the login it would then start is itself
+    # what needs the network. The token it prints is discarded here; only whether it is empty is read.
+    if [ -z "$(infisical user get token --silent 2>/dev/null)" ]; then
+        echo "cache-login: this machine is not logged in to Infisical; starting 'infisical login'." >&2
+        if ! infisical login; then
+            echo "cache-login: 'infisical login' did not complete, so the token cannot be read." >&2
+            exit 1
+        fi
+    fi
     # why: the CLI's stderr is captured and reprinted rather than discarded. An earlier version sent it
     # to /dev/null and printed only a guess, which turned "no project is linked in this directory" —
     # the most common failure, and one that says nothing about the secret — into a message about
