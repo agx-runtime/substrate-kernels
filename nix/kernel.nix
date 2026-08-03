@@ -115,7 +115,6 @@ in
             configFile,
             packScript,
             invariantScript,
-            buildIdScript,
             abiVersion ? 1,
         }:
         let
@@ -193,32 +192,7 @@ in
                 installPhase = ''
                     runHook preInstall
                     mkdir -p "$out"
-                    echo "REPRODEBUG t0 vmlinux $(sha256sum ${kernelBinaryOf.${guestArch}} | cut -c1-16)"
-                    cat ${kernelBinaryOf.${guestArch}} > /dev/null
-                    echo "REPRODEBUG t1 after-full-read $(sha256sum ${kernelBinaryOf.${guestArch}} | cut -c1-16)"
-                    sync
-                    echo "REPRODEBUG t2 after-sync $(sha256sum ${kernelBinaryOf.${guestArch}} | cut -c1-16)"
-
-                    # Install the kernel binary first, then normalize the build-ids on the INSTALLED copy
-                    # rather than on the build-tree file.
-                    #
-                    # why: ld computes each `--build-id=sha1` over the object it has just linked, before
-                    # sorttable reorders __ex_table and objcopy strips each embedded vDSO's debug sections,
-                    # so the id hashes bytes the finished file no longer contains and differs across build
-                    # machines. normalize-build-id.py recomputes each descriptor as a hash of the file's own
-                    # content so it becomes a function of the deterministic bytes alone (ADR 0005). The
-                    # subtlety this ordering fixes: run against the build-tree vmlinux, normalize on some
-                    # machines hashed a state that did not match the bytes finally shipped, stamping a
-                    # build-id that failed the rebuild check even though the installed content was identical
-                    # across machines (verified by diffing two machines' outputs: only the build-id
-                    # descriptors differed, and the installed body hashed the same on both). The installed
-                    # file is the settled artifact, so normalizing it makes the id a function of exactly what
-                    # ships, and the packer then reads that normalized binary so the bundle carries the same
-                    # id. The normalized config rides along so a released bundle can be audited without a
-                    # rebuild.
                     install -m 644 ${kernelBinaryOf.${guestArch}} "$out/kernel-binary"
-                    echo "REPRODEBUG t3 installed-prenorm $(sha256sum "$out/kernel-binary" | cut -c1-16)"
-                    NORMALIZE_DEBUG=1 python3 ${buildIdScript} "$out/kernel-binary"
                     python3 ${packScript} \
                         --arch ${guestArch} \
                         --variant ${variant} \
