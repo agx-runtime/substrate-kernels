@@ -171,6 +171,14 @@ in
                 patchPhase = ''
                     runHook prePatch
                     ${strictPatchScript patchDir}
+                    # why: the build sandbox has no /usr/bin/env, so a kernel build script invoked through
+                    # its `#!/usr/bin/env python3` shebang fails with "cannot execute: required file not
+                    # found". CONFIG_DEBUG_INFO_BTF reaches scripts/bpf_doc.py this way while building
+                    # resolve_btfids, which broke the debug cells the moment builds became sandboxed
+                    # (ADR 0005). patchShebangs rewrites those shebangs to the build's own python in the
+                    # store, which exists inside the sandbox. The unsandboxed build only worked by finding
+                    # the host interpreter — the exact impurity the sandbox exists to forbid.
+                    patchShebangs scripts tools
                     runHook postPatch
                 '';
 
