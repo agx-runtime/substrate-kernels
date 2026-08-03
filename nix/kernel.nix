@@ -204,14 +204,7 @@ in
                 # while this phase races the kernel build's own late writes was what left the id
                 # machine-specific in the first place.
                 postBuild = ''
-                    echo "REPRODEBUG: make returned; watching ${kernelBinaryOf.${guestArch}} for a concurrent writer"
-                    for i in 1 2 3 4 5 6 7 8; do
-                        echo "REPRODEBUG t$i sha=$(sha256sum ${kernelBinaryOf.${guestArch}} | cut -c1-16) mtime=$(stat -c %Y ${kernelBinaryOf.${guestArch}} 2>/dev/null || echo '?')"
-                        sleep 0.25
-                    done
-                    if command -v lsof >/dev/null 2>&1; then echo "REPRODEBUG lsof:"; lsof ${kernelBinaryOf.${guestArch}} 2>&1 | head -5 || true; fi
-                    echo "REPRODEBUG procs:"; ps -eo pid,ppid,stat,comm 2>/dev/null | grep -iE 'sort|objtool|kallsyms|link|make|python|[ ]ld$|[ ]nm$' | grep -v grep | head -20 || true
-                    python3 ${buildIdScript} vmlinux ${kernelBinaryOf.${guestArch}}
+                    NORMALIZE_DEBUG=1 python3 ${buildIdScript} vmlinux ${kernelBinaryOf.${guestArch}}
                 '';
 
                 installPhase = ''
