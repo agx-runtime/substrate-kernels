@@ -193,6 +193,11 @@ in
                 installPhase = ''
                     runHook preInstall
                     mkdir -p "$out"
+                    echo "REPRODEBUG t0 vmlinux $(sha256sum ${kernelBinaryOf.${guestArch}} | cut -c1-16)"
+                    cat ${kernelBinaryOf.${guestArch}} > /dev/null
+                    echo "REPRODEBUG t1 after-full-read $(sha256sum ${kernelBinaryOf.${guestArch}} | cut -c1-16)"
+                    sync
+                    echo "REPRODEBUG t2 after-sync $(sha256sum ${kernelBinaryOf.${guestArch}} | cut -c1-16)"
 
                     # Install the kernel binary first, then normalize the build-ids on the INSTALLED copy
                     # rather than on the build-tree file.
@@ -212,6 +217,7 @@ in
                     # id. The normalized config rides along so a released bundle can be audited without a
                     # rebuild.
                     install -m 644 ${kernelBinaryOf.${guestArch}} "$out/kernel-binary"
+                    echo "REPRODEBUG t3 installed-prenorm $(sha256sum "$out/kernel-binary" | cut -c1-16)"
                     python3 ${buildIdScript} "$out/kernel-binary"
                     python3 ${packScript} \
                         --arch ${guestArch} \
