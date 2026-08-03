@@ -190,46 +190,43 @@ in
                     runHook postBuild
                 '';
 
-                # why: ld computes the vmlinux .note.gnu.build-id during the final link, but
-                # sorttable (CONFIG_BUILDTIME_TABLE_SORT) then sorts __ex_table and the other
-                # runtime tables in place afterwards. The pre-sort table order varies from one
-                # build machine to the next while the sorted result does not, so every byte of the
-                # final vmlinux is reproducible except the build-id, which ld hashed over a pre-sort
-                # state the file no longer contains — a repro-check that fails on exactly the
-                # 20-byte build-id (the note and its .rodata copy) with every other byte identical
-                # (ADR 0005). This recomputes the build-id from the final content, after all
-                # post-link processing, so it becomes a function of the deterministic bytes alone.
-                # It runs before the packer and the kernel-binary install, so every artifact those
-                # phases produce carries the reproducible id.
+                # why: ld computes each `--build-id=sha1` over the object it has just linked, and later
+                # stages rewrite that object in place (sorttable reorders __ex_table in the vmlinux;
+                # objcopy strips each vDSO's debug sections before it is embedded as a raw_data[] array),
+                # so the build-id hashes bytes the finished file no longer contains. Diffing ld's raw
+                # vmlinux from two build machines confirmed the consequence exactly: they differ in the
+                # two 20-byte GNU build-id descriptors (the main .note.gnu.build-id and the embedded
+                # vDSO's) and in nothing else, so the build-id is the only thing that breaks a
+                # byte-identical rebuild (ADR 0005). normalize-build-id.py recomputes each descriptor from
+                # the final content so it is a function of the deterministic bytes alone. It runs before
+                # the packer and the kernel-binary install so every artifact carries the reproducible id,
+                # and it waits for the vmlinux to stop changing before hashing it, because reading the file
+                # while this phase races the kernel build's own late writes was what left the id
+                # machine-specific in the first place.
                 postBuild = ''
-                    cp ${kernelBinaryOf.${guestArch}} /tmp/reprodebug-prenorm
+                    echo "REPRODEBUG: make returned; watching ${kernelBinaryOf.${guestArch}} for a concurrent writer"
+                    for i in 1 2 3 4 5 6 7 8; do
+                        echo "REPRODEBUG t$i sha=$(sha256sum ${kernelBinaryOf.${guestArch}} | cut -c1-16) mtime=$(stat -c %Y ${kernelBinaryOf.${guestArch}} 2>/dev/null || echo '?')"
+                        sleep 0.25
+                    done
+                    if command -v lsof >/dev/null 2>&1; then echo "REPRODEBUG lsof:"; lsof ${kernelBinaryOf.${guestArch}} 2>&1 | head -5 || true; fi
+                    echo "REPRODEBUG procs:"; ps -eo pid,ppid,stat,comm 2>/dev/null | grep -iE 'sort|objtool|kallsyms|link|make|python|[ ]ld$|[ ]nm$' | grep -v grep | head -20 || true
                     python3 ${buildIdScript} vmlinux ${kernelBinaryOf.${guestArch}}
-                    cp ${kernelBinaryOf.${guestArch}} /tmp/reprodebug-postnorm
-                    echo "REPRODEBUG prenorm  $(sha256sum /tmp/reprodebug-prenorm | cut -d' ' -f1)"
-                    echo "REPRODEBUG postnorm $(sha256sum /tmp/reprodebug-postnorm | cut -d' ' -f1)"
                 '';
 
                 installPhase = ''
                     runHook preInstall
                     mkdir -p "$out"
-                    echo "REPRODEBUG install-start $(sha256sum ${kernelBinaryOf.${guestArch}} | cut -d' ' -f1)"
                     python3 ${packScript} \
                         --arch ${guestArch} \
                         --variant ${variant} \
                         --abi-version ${toString abiVersion} \
                         --kernel ${kernelBinaryOf.${guestArch}} \
                         --output "$out/${bundleFile}"
-                    echo "REPRODEBUG post-pack   $(sha256sum ${kernelBinaryOf.${guestArch}} | cut -d' ' -f1)"
                     # The raw kernel binary rides along for the QEMU boot-smoke lane, and the
                     # normalized config rides along so a released bundle can be audited without
                     # rebuilding it.
                     install -m 644 ${kernelBinaryOf.${guestArch}} "$out/kernel-binary"
-                    # REPRODEBUG: keep the pre- and post-normalize snapshots so they can be diffed
-                    # cross-machine offline. The pre-normalize (ld's) vmlinux is what shows whether the
-                    # original non-determinism is only the build-id or real content elsewhere.
-                    install -m 644 /tmp/reprodebug-prenorm "$out/reprodebug-prenorm"
-                    install -m 644 /tmp/reprodebug-postnorm "$out/reprodebug-postnorm"
-                    echo "REPRODEBUG installed   $(sha256sum "$out/kernel-binary" | cut -d' ' -f1)"
                     install -m 644 .config "$out/config"
                     runHook postInstall
                 '';
