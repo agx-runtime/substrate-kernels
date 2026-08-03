@@ -10,6 +10,16 @@ name: CI
 # store paths CI builds here are the store paths every machine computes from the same
 # commit. CI covers x86_64 + aarch64 (substrate's hosts); riscv64 and the windows variant
 # are carried but not CI-gated (ADR 0002).
+#
+# The nix-building jobs run on privileged Namespace runners (the `-with-features` label plus
+# `namespace-features:container.privileged=true`). Reproducibility depends on the nix sandbox,
+# and the sandbox needs Linux user namespaces; a stock Namespace runner is an unprivileged
+# container where the kernel forbids them, so nix silently falls back to an unsandboxed build in
+# a per-build directory (/nix/var/nix/builds/nix-<pid>-<rand>). That directory leaks into the
+# GNU build-id (ld hashes it, objcopy then strips it), so two builds of byte-identical content
+# stamp different build-ids and repro-check fails on exactly those 20-byte descriptors. The
+# privileged runner lets the sandbox build in a fixed /build, which is what makes the build-id
+# reproducible — verified against the same failure on bare-metal hosts (docs/adr/0005).
 
 on:
   pull_request:
@@ -40,7 +50,9 @@ jobs:
         include:
           - { rarch: amd64 }
           - { rarch: arm64 }
-    runs-on: nscloud-ubuntu-24.04-${{ matrix.rarch }}-8x16
+    runs-on:
+      - nscloud-ubuntu-24.04-${{ matrix.rarch }}-8x16-with-features
+      - namespace-features:container.privileged=true
     steps:
       - uses: actions/checkout@v6
         # This job only validates, so it wires the cache in read-only and never signs or pushes;
@@ -72,7 +84,9 @@ jobs:
           - { kernel_line: "6.18", line_attr: "6_18", garch: x86_64, rarch: amd64, variant: debug }
           - { kernel_line: "6.18", line_attr: "6_18", garch: aarch64, rarch: arm64, variant: base }
           - { kernel_line: "6.18", line_attr: "6_18", garch: aarch64, rarch: arm64, variant: debug }
-    runs-on: nscloud-ubuntu-24.04-${{ matrix.rarch }}-8x16
+    runs-on:
+      - nscloud-ubuntu-24.04-${{ matrix.rarch }}-8x16-with-features
+      - namespace-features:container.privileged=true
     steps:
       - uses: actions/checkout@v6
       - uses: agx-runtime/cachet-action@v1
@@ -112,7 +126,9 @@ jobs:
           - { kernel_line: "6.18", garch: x86_64, rarch: amd64, variant: debug }
           - { kernel_line: "6.18", garch: aarch64, rarch: arm64, variant: base }
           - { kernel_line: "6.18", garch: aarch64, rarch: arm64, variant: debug }
-    runs-on: nscloud-ubuntu-24.04-${{ matrix.rarch }}-8x16
+    runs-on:
+      - nscloud-ubuntu-24.04-${{ matrix.rarch }}-8x16-with-features
+      - namespace-features:container.privileged=true
     steps:
       - uses: actions/checkout@v6
       - uses: actions/download-artifact@v8
@@ -143,7 +159,9 @@ jobs:
           - { line_attr: "6_18", garch: x86_64, rarch: amd64, variant: debug }
           - { line_attr: "6_18", garch: aarch64, rarch: arm64, variant: base }
           - { line_attr: "6_18", garch: aarch64, rarch: arm64, variant: debug }
-    runs-on: nscloud-ubuntu-24.04-${{ matrix.rarch }}-8x16
+    runs-on:
+      - nscloud-ubuntu-24.04-${{ matrix.rarch }}-8x16-with-features
+      - namespace-features:container.privileged=true
     steps:
       - uses: actions/checkout@v6
       # Read-only: the rebuilt paths are byte-identical to what the build lane already
