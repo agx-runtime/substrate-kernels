@@ -218,7 +218,7 @@ in
                     # rebuild.
                     install -m 644 ${kernelBinaryOf.${guestArch}} "$out/kernel-binary"
                     echo "REPRODEBUG t3 installed-prenorm $(sha256sum "$out/kernel-binary" | cut -c1-16)"
-                    python3 ${buildIdScript} "$out/kernel-binary"
+                    NORMALIZE_DEBUG=1 python3 ${buildIdScript} "$out/kernel-binary"
                     python3 ${packScript} \
                         --arch ${guestArch} \
                         --variant ${variant} \
