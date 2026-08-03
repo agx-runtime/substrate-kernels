@@ -115,6 +115,7 @@ in
             configFile,
             packScript,
             invariantScript,
+            buildIdScript,
             abiVersion ? 1,
         }:
         let
@@ -192,7 +193,16 @@ in
                 installPhase = ''
                     runHook preInstall
                     mkdir -p "$out"
+                    # why: ld stamps each `--build-id=sha1` over the object it links, and that hash
+                    # reflects transient bytes (pre-sorttable, pre-strip) that the nscloud CI runners do
+                    # not reproduce across two builds of byte-identical content — every other byte
+                    # matches, only the 20-byte build-id descriptors differ, and the rebuild check fails
+                    # there while it passes on bare metal. normalize-build-id.py rewrites each descriptor
+                    # to a hash of the file's own settled content, making it a function of the
+                    # deterministic bytes alone (ADR 0005). It runs on the installed copy, which is the
+                    # settled artifact the packer then reads, so the bundle carries the same normalised id.
                     install -m 644 ${kernelBinaryOf.${guestArch}} "$out/kernel-binary"
+                    python3 ${buildIdScript} "$out/kernel-binary"
                     python3 ${packScript} \
                         --arch ${guestArch} \
                         --variant ${variant} \

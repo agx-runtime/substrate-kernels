@@ -76,6 +76,7 @@
                 configFile = ./. + "/config-${cell.variant}_${cell.guestArch}";
                 packScript = ./scripts/pack-kernel.py;
                 invariantScript = ./scripts/config-invariant.py;
+                buildIdScript = ./scripts/normalize-build-id.py;
             };
 
             # Attribute names carry the line with an underscore (kernel-6_12-base-x86_64),
@@ -105,6 +106,7 @@
                             builtins.removeAttrs (cellArgs line cell) [
                                 "lib"
                                 "packScript"
+                                "buildIdScript"
                             ]
                         )
                     )
