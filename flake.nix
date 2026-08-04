@@ -189,6 +189,15 @@
                     default = pkgs.mkShellNoCC {
                         packages = [
                             pkgs.just
+                            # `just cache-login` runs infisical (to read the cache token) and jq (to merge
+                            # the Determinate config), so both belong in the shell rather than being
+                            # assumed present on the host. Pinning infisical here also fixes which version
+                            # the verb uses: an ambient host infisical is what a teammate fell back to, and
+                            # it could not resolve the project, so the login failed from this shell while
+                            # it worked from cachet's. The committed .infisical.json is what actually names
+                            # the project — infisical 0.41 ignores --projectId and reads that file instead.
+                            pkgs.infisical
+                            pkgs.jq
                             (pkgs.python3.withPackages (ps: [ ps.pyelftools ]))
                             pkgs.shellcheck
                         ];
