@@ -110,7 +110,7 @@ jobs:
           fetch-depth: 1
       # Read-only: a release republishes what CI already built and pushed; the lease belongs
       # to the CI build lane, which runs on every push to main.
-      - uses: agx-runtime/cachet-action@v1
+      - uses: agx-runtime/cachet-action@786028cf6f2e609666c53751c18e6e723452ab16 # v1
         with:
           push: "false"
           signing-key: ${{ secrets.CACHET_SIGNING_KEY }}
