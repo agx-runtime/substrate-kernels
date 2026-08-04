@@ -52,10 +52,15 @@ install prefix="/usr/local" variant="base" garch=guest_arch: (build variant garc
     install -d "{{ prefix }}/lib/substrate/kernels/"
     install -m 644 result/*.kernel "{{ prefix }}/lib/substrate/kernels/"
 
+# The Infisical project that holds the shared read token — cachet's workspace, and the same one from any
+# repository, because the token lives there regardless of which repo authenticates. Passed explicitly so
+# this verb never depends on the copied script's baked-in default staying in sync with cachet's.
+cache_infisical_project_id := "7c433b42-4d98-4d30-b3dc-daf7111ef7cc"
+
 # Authenticate this machine to the org binary cache. Host-level and idempotent: one run
 # covers every project on the machine (the canonical script lives in the cachet repository).
 cache-login *args:
-    sh scripts/cache-login.sh {{ args }}
+    sh scripts/cache-login.sh --infisical-project-id {{ cache_infisical_project_id }} {{ args }}
 
 clean:
     rm -f result result-*
