@@ -62,7 +62,7 @@ jobs:
       # CACHET_SIGNING_KEY in a job granting id-token: write, and a tag can be moved, so
       # a tag reference would let unreviewed code run with the signing key and the job's
       # OIDC-minting power. The trailing "# v1" records the tag this SHA currently backs.
-      - uses: agx-runtime/cachet-action@786028cf6f2e609666c53751c18e6e723452ab16 # v1
+      - uses: agx-runtime/cachet-action@v1 # v1
         with:
           signing-key: ${{ secrets.CACHET_SIGNING_KEY }}
           push: 'false'
@@ -95,7 +95,7 @@ jobs:
       - namespace-features:container.privileged=true
     steps:
       - uses: actions/checkout@v6
-      - uses: agx-runtime/cachet-action@786028cf6f2e609666c53751c18e6e723452ab16 # v1
+      - uses: agx-runtime/cachet-action@v1 # v1
         with:
           roots: .#kernel-${{ matrix.line_attr }}-${{ matrix.variant }}-${{ matrix.garch }}
           project: agx-runtime-substrate-kernels-${{ matrix.kernel_line }}-${{ matrix.variant }}-${{ matrix.garch }}
@@ -188,7 +188,7 @@ jobs:
       - uses: actions/checkout@v6
       # Read-only: the rebuilt paths are byte-identical to what the build lane already
       # pushed, so pushing them again would only spend upload time.
-      - uses: agx-runtime/cachet-action@786028cf6f2e609666c53751c18e6e723452ab16 # v1
+      - uses: agx-runtime/cachet-action@v1 # v1
         with:
           push: "false"
           signing-key: ${{ secrets.CACHET_SIGNING_KEY }}
