@@ -63,8 +63,8 @@ path a laptop can download instead of compiling.
    the other seven cells' protection.
 
 6. **macOS builds through the nix-darwin `linux-builder` VM, and only on a cache miss.** The
-   host daemon queries substituters before it schedules any build, so a laptop that has run
-   `just cache-login` downloads CI's bundles directly and the VM sits idle. On a miss — local
+   host daemon queries substituters before it schedules any build, so a laptop authenticated
+   to the cache downloads CI's bundles directly and the VM sits idle. On a miss — local
    kernel hacking — the host copies the inputs it substituted into the VM over the builder's
    ssh channel and the VM compiles. The VM therefore needs no cache credential and no
    configuration beyond existing: credentials stay host-side, in the daemon netrc
@@ -75,7 +75,7 @@ path a laptop can download instead of compiling.
 - Host prerequisites drop to Determinate Nix, direnv, and — for compiling kernels on a Mac —
   the linux-builder VM. Docker is gone: the container, its image build, and the venv are
   deleted, and the packer's Python and pyelftools come from the dev shell and the sandbox.
-- A clone on a machine that ran `just cache-login` builds nothing the org has already built:
+- A clone on a machine authenticated to the cache builds nothing the org has already built:
   `just build` resolves to a store path CI pushed and downloads it. The first build of a
   changed kernel still costs a compile, on the VM or on CI.
 - The riscv64 cross toolchain is not prebuilt by cache.nixos.org, so the first CI build of

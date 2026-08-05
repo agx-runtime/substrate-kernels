@@ -69,8 +69,8 @@ underscore form the attribute names carry
   `agx-runtime/cachet/action@main` composite; the build lane pushes each cell's
   closure and renews the cell's lease,
   `agx-runtime-substrate-kernels-<line>-<variant>-<arch>`. A laptop authenticates
-  once with `just cache-login`, and `just build` on that machine downloads a CI-built
-  cell instead of compiling it.
+  to the cache once (with `cache-login`, run from a cachet checkout), and `just build` on
+  that machine downloads a CI-built cell instead of compiling it.
 - **`just install`** — stages `result/*.kernel` into
   `<prefix>/lib/substrate/kernels/`, the path substrate reads.
 - **The carried cells** — riscv64-base and x86_64-windows remain buildable flake

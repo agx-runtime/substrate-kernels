@@ -29,11 +29,12 @@ Host prerequisites are [Determinate Nix](https://install.determinate.systems) an
 everything else — just, python, the kernel toolchain — comes from the flake
 ([ADR 0017](docs/adr/0017-nix-build-and-flake-interface.md)). Every build is a Nix
 derivation, so a machine that has authenticated to the org binary cache downloads what CI
-already built instead of compiling it:
+already built instead of compiling it. Authenticating is a one-time, host-level step run
+from a cachet checkout — `just cache-login` there configures the nix daemon for every
+project on the machine — so this repository ships no cache-login of its own.
 
 ```sh
 git clone … && cd substrate-kernels && direnv allow
-just cache-login          # once per machine: authenticate to the org binary cache
 just build                # the base bundle for this machine's architecture → ./result
 just line=6.18 build      # build 6.18.39 (default: compatibility line 6.12.96)
 just build base x86_64    # any cell: just build <variant> <arch>
@@ -148,7 +149,6 @@ scripts/
   config-invariant.py     # required/forbidden CONFIG_* per (arch, variant)
   check-doc-manifest.sh   # CLAUDE.md §10 import-manifest gate
   boot-smoke.sh           # interim QEMU boot check
-  cache-login.sh          # authenticate this machine to the org binary cache
 config-<variant>_<arch>   # the curated per-cell kernel .config files
 patches/<line>/           # independently re-derived zero-offset series per LTS line
 tests/                    # bundle-golden + pack-kernel unit checks

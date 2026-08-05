@@ -67,8 +67,8 @@ cross-compiled from x86_64-linux
 ([ADR 0017](adr/0017-nix-build-and-flake-interface.md)). Flake attribute names carry
 the full identity (`kernel-6_12-base-x86_64` — the line's dot becomes an underscore
 because a dot in a `.#` fragment splits the attribute path), so both LTS lines
-coexist as separate derivations. A machine that has run `just cache-login`
-substitutes CI-built cells from the org binary cache; on macOS, a cell the cache
+coexist as separate derivations. A machine authenticated to the org binary cache
+substitutes CI-built cells from it; on macOS, a cell the cache
 does not hold compiles in the nix-darwin `linux-builder` VM. Details live in
 [design/build-pipeline.md](design/build-pipeline.md).
 
