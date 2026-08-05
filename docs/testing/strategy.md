@@ -11,20 +11,21 @@ and §8 (verification).
 | Stage (architecture.md §2) | Gate | Catches | Where |
 |---|---|---|---|
 | ① pin → tarball | **sha256 check** | a tampered/wrong-version tarball | every build (pre-extract) |
-| ② → ③ patch | **applies-clean** | a patch fuzzed/rejected against the pin | every build; full series on a version bump |
-| ③ → ④ configure | **config-invariant** | `olddefconfig` dropping a required option / admitting a forbidden one | every build, per (arch, variant) |
+| ② → ③ patch | **applies-clean** | a patch fuzzed/rejected against the pin | every build and every `nix flake check`; the full series re-validated on a version bump |
+| ③ → ④ configure | **config-invariant** | `olddefconfig` dropping a required option / admitting a forbidden one | every build, per (arch, variant); also the `configured` flake check, without a compile |
 | ⑤ compile | **fixed-metadata** | wall-clock/host leakage | folded into repro-check |
-| ⑥ pack | **bundle-golden** | header-layout / alignment drift | on packer or format change |
-| whole build | **`make repro-check`** | non-byte-identical rebuild (toolchain/source/metadata drift) | periodic + on toolchain/pin bump |
-| artifact | **boot-smoke** | a kernel that builds but doesn't boot/run under substrate | per PR (changed cells); full matrix periodic |
+| ⑥ pack | **bundle-golden** | header-layout / alignment drift | every `nix flake check` (per PR) |
+| whole build | **`just repro-check`** | non-byte-identical rebuild (toolchain/source/metadata drift) | CI on main + manual dispatch; re-run on a toolchain/pin bump |
+| artifact | **boot-smoke** | a kernel that builds but doesn't boot/run under substrate | per PR (QEMU on every CI-gated cell); the substrate loader lane cross-repo |
 | artifact | **budgets** | image-size / boot-time regression | review signal (per PR), trend (periodic) |
 
 ## Per-component verification
 
 - **Source pin** ([ADR 0001](../adr/0001-kernel-source-pin-and-update-lifecycle.md)) —
   the sha256 check is the gate; the pin-drift lane surfaces newer point releases
-  for opt-in. *How:* fetch, hash, compare to the selected
-  `scripts/kernel-pins/<line>.env`. *Why:* the
+  for opt-in. *How:* the fixed-output fetch verifies the tarball against the sha256
+  in the selected `scripts/kernel-pins/<line>.env` (parsed by `nix/pins.nix`).
+  *Why:* the
   root of reproducibility. *What if it fails:* hard stop before extract.
 - **Patch series** ([patches.md](../design/patches.md),
   [ADR 0007](../adr/0007-patch-management-policy.md)) — applies-clean. *How:* apply
@@ -46,9 +47,11 @@ and §8 (verification).
   *What if it fails:* a format change must bump `format_version` and update both
   sides + the golden.
 - **Reproducibility** ([reproducibility.md](../design/reproducibility.md),
-  [ADR 0005](../adr/0005-build-environment-and-reproducibility.md)) — `make
-  repro-check`. *How:* perform two clean builds in the pinned container and
-  compare their bytes; run cross-host when the toolchain changes. *Why:* CLAUDE.md
+  [ADR 0005](../adr/0005-build-environment-and-reproducibility.md)) — `just
+  repro-check`. *How:* `nix build` realizes the cell (by substitution when the org
+  cache holds it), then `nix build --rebuild` compiles it locally and fails if a
+  single byte differs — so on a substituted path the gate also proves the cache
+  serves what this commit's source builds. *Why:* CLAUDE.md
   §3. *What if
   it fails:* a toolchain/source/metadata input drifted — root-cause it.
 - **Boot contract / runtime** ([ADR 0004](../adr/0004-boot-contract-with-substrate.md))
@@ -71,15 +74,24 @@ and §8 (verification).
 
 ## Platform matrix
 
-- **Input + artifact gates** (sha256, applies-clean, config-invariant,
-  bundle-golden, repro-check) are **host-independent** — they run in the pinned
-  Linux container on any dev host or CI runner.
+- **The input and artifact gates** (sha256, applies-clean, config-invariant,
+  bundle-golden, repro-check) run as Nix derivations, so any machine with Nix runs
+  the same gate the same way. `nix flake check` (the `just ci` verb) runs the
+  static gates and applies-clean on every system, macOS included; each configured
+  gate, each compile, and repro-check run on the cell's one canonical Linux build
+  system ([ADR 0017](../adr/0017-nix-build-and-flake-interface.md)). On a macOS
+  host the nix-darwin linux-builder VM compiles on a cache miss, and the org
+  binary cache supplies the cell otherwise.
 - **boot-smoke** needs a real hypervisor: the release gate uses KVM on AMD and
   Intel x86_64 and on aarch64; HVF remains a substrate compatibility lane. It
   uses substrate as the loader and consumes the produced
-  `.kernel`. Fixtures (a substrate build + a rootfs disk/initramfs) are staged, not
-  rebuilt per run; a missing fixture is a `panic!("[fixture] … — run make …")`,
-  never a skip (CLAUDE.md §9).
+  `.kernel`. CI's per-PR boot-smoke job is the interim stand-in: it boots each
+  built cell's raw `kernel-binary` under QEMU installed from apt on the runner —
+  harness tooling, never an input to the artifact — and `scripts/boot-smoke.sh`
+  records what that lane does and does not prove. Fixtures for the substrate lane
+  (a substrate build + a rootfs disk/initramfs) are staged, not
+  rebuilt per run; a missing fixture is a `panic!` naming the command that stages
+  it, never a skip (CLAUDE.md §9).
 
 ## No silent skips, no flakes
 

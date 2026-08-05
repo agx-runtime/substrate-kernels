@@ -78,9 +78,9 @@ upstream fixes intact.
 
 - Patch order is dependency order. Every file has its provenance and downstream
   rationale in the commit message.
-- `make applies-clean KERNEL_LINE=<line>` rejects any fuzz or offset. A patch that
+- `just line=<line> applies-clean` rejects any fuzz or offset. A patch that
   needs either is re-derived, never forced.
-- `make configured` checks the matching normalized config. Unimplemented device
+- `just configured` checks the matching normalized config. Unimplemented device
   families such as virtio-RTC and virtio-fs DAX are explicitly forbidden.
 - Both LTS lines build base and debug bundles for x86_64 and aarch64. The release
   gate then boots them with substrate on the matching architecture; x86 is tested
@@ -88,10 +88,10 @@ upstream fixes intact.
 - The vsock gate records offered and acknowledged bits, proves an unknown DGRAM
   offer is declined safely, and completes a real 128 KiB stream transfer. Clean
   workload shutdown and DAX-less virtio-fs are separate checks.
-- `make repro-check` must produce byte-identical debug bundles, which exercises
-  the pahole patch rather than assuming it works. In the controlled audit, stock
-  pahole produced different bundles on both lines; adding only `0003` made both
-  two-clean-build checks byte-identical.
+- `just repro-check debug` must rebuild the debug bundle byte-identically, which
+  exercises the pahole patch rather than assuming it works. In the controlled
+  audit, stock pahole produced different bundles on both lines; adding only `0003`
+  made both two-clean-build checks byte-identical.
 
 Any future patch must name a live substrate consumer, cite its origin, include a
 targeted failure-mode test, and state when it can be deleted. Build success by

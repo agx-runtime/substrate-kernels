@@ -25,24 +25,31 @@ entry (`e_entry`); aarch64 is the raw `Image` at the consumer's DRAM base
 
 ## Quick start
 
-The Linux build stages run inside a digest-pinned container
-([`tools/build/Dockerfile`](tools/build/Dockerfile)). On **macOS** the `Makefile`
-runs them in that container automatically (needs Docker); on **Linux** run inside
-the same container (CI does this) or natively with the pinned toolchain installed.
+Host prerequisites are [Determinate Nix](https://install.determinate.systems) and `direnv`;
+everything else — just, python, the kernel toolchain — comes from the flake
+([ADR 0017](docs/adr/0017-nix-build-and-flake-interface.md)). Every build is a Nix
+derivation, so a machine that has authenticated to the org binary cache downloads what CI
+already built instead of compiling it. Authenticating is a one-time, host-level step run
+from a cachet checkout — `just cache-login` there configures the nix daemon for every
+project on the machine — so this repository ships no cache-login of its own.
 
 ```sh
-make                      # build the base bundle for the host architecture
-make KERNEL_LINE=6.18     # build 6.18.39 (default: compatibility line 6.12.96)
-make ARCH=aarch64         # build base for aarch64 (cross-compiled)
-make ARCH=x86_64          # build base for x86_64
-make VARIANT=windows      # the windows (WHP) variant — x86_64, packed at 4 KiB
-make install PREFIX=/usr/local   # stage to $(PREFIX)/lib/substrate/kernels/
-make clean
+git clone … && cd substrate-kernels && direnv allow
+just build                # the base bundle for this machine's architecture → ./result
+just line=6.18 build      # build 6.18.39 (default: compatibility line 6.12.96)
+just build base x86_64    # any cell: just build <variant> <arch>
+just build windows x86_64 # the windows (WHP) variant — x86_64, packed at 4 KiB
+just install              # stage result/*.kernel to /usr/local/lib/substrate/kernels/
 ```
 
-The first build fetches the pinned tarball over HTTPS and **verifies its sha256
-before extraction** (a mismatch fails the build). `JOBS=N` caps compile parallelism
-where RAM, not CPU, is the constraint (e.g. `JOBS=4`).
+On a cache miss the kernel compiles: natively on a Linux machine, and inside the
+nix-darwin `linux-builder` VM on macOS — enable it once with
+`nix.linux-builder.enable = true;` in your nix-darwin configuration. A macOS machine that
+only consumes bundles needs no builder at all, because substitution happens on the host
+before any build is scheduled.
+
+The pinned tarball is fetched as a fixed-output derivation, so Nix itself verifies the
+checked-in sha256 before a byte of it is used (a mismatch fails the build).
 
 ## Kernel lines and architecture × variant matrix
 
@@ -69,10 +76,10 @@ and the bundles never had the required firmware/initrd wiring.
 Pick the gate for the failure class ([testing/strategy.md](docs/testing/strategy.md)):
 
 ```sh
-make ci             # fast static gates: doc-manifest, bundle-golden, pack-unit
-make applies-clean KERNEL_LINE=6.18  # ZERO fuzz / ZERO offset
-make configured KERNEL_LINE=6.18     # olddefconfig + config invariants
-make repro-check KERNEL_LINE=6.18    # byte-identical selected-line rebuild
+just ci                        # every gate for this system: nix flake check
+just line=6.18 applies-clean   # the series applies with zero fuzz and zero offset
+just line=6.18 configured      # olddefconfig + config invariants, no compile
+just line=6.18 repro-check     # byte-identical rebuild of the selected cell
 ```
 
 Release validation boots the produced `SUBK` bundles under **substrate** on real
@@ -130,7 +137,12 @@ sha256 is a stable content identity you can attest and cache against.
 ```
 CLAUDE.md                 # the binding constitution (read first)
 docs/                     # ADRs + design + testing docs (the design of record)
-Makefile                  # the pin→tarball→patch→config→compile→pack pipeline
+flake.nix                 # every pipeline output: bundles, gates, the dev shell
+flake.lock                # the toolchain pin (ADR 0005)
+nix/
+  kernel.nix              # the bundle, applies-clean, and configured derivations
+  pins.nix                # parser for the kernel-pins .env files
+Justfile                  # the verbs — thin aliases over flake outputs
 scripts/
   kernel-pins/            # exact version/hash/URL pin for each supported LTS line
   pack-kernel.py          # the SUBK packer
@@ -139,7 +151,6 @@ scripts/
   boot-smoke.sh           # interim QEMU boot check
 config-<variant>_<arch>   # the curated per-cell kernel .config files
 patches/<line>/           # independently re-derived zero-offset series per LTS line
-tools/build/Dockerfile    # the digest-pinned toolchain container
 tests/                    # bundle-golden + pack-kernel unit checks
-.github/workflows/        # ci.yml (gates) + release.yml (publish)
+.github/workflows/        # ci.yml (gates + cache push) + release.yml (publish)
 ```

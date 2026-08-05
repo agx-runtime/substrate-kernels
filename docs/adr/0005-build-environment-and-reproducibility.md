@@ -1,83 +1,104 @@
 # ADR 0005 — Build environment and reproducibility
 
 - **Status:** Accepted
-- **Date:** 2026-05-27
+- **Date:** 2026-08-01
 - **Context doc:** [../design/reproducibility.md](../design/reproducibility.md)
-  (the mechanics + the gate); CLAUDE.md §3 (reproducibility is the point)
+  (the mechanics + the gate); CLAUDE.md §3 (reproducibility is a law);
+  [0017](0017-nix-build-and-flake-interface.md) (the build system that realizes this)
 
 ## Context
 
-CLAUDE.md §3 makes byte-reproducibility a law: the same pinned source (ADR 0001),
-patch series, and config must yield a **byte-identical** `.kernel` on any host. A
-guest kernel that two builds disagree on cannot be attested, cached by digest, or
-debugged with confidence. Three things break reproducibility if left ambient:
+CLAUDE.md §3 makes byte-reproducibility a law: the same pinned source (ADR 0001), patch
+series, and config must yield a byte-identical `.kernel` on any host. A guest kernel that two
+builds disagree on cannot be attested, cached by digest, or debugged with confidence. Three
+things break reproducibility if left ambient:
 
-1. **The toolchain.** Kernel output is sensitive to the compiler, binutils, and
-   build utilities (gcc/clang version, `ld`, `objcopy`); two hosts with different
-   toolchains produce different images from identical source.
-2. **Build metadata.** The kernel embeds `KBUILD_BUILD_TIMESTAMP`, `_USER`,
-   `_HOST`, and assorted build IDs — wall-clock and host identity leaking into the
-   image.
-3. **The host OS.** The primary dev host is **macOS** (Apple Silicon), but a Linux
-   kernel must be built on Linux. The build environment must bridge that without
-   making the result host-dependent.
+1. **The toolchain.** Kernel output is sensitive to the compiler, binutils, and build
+   utilities; two hosts with different toolchains produce different images from identical
+   source.
+2. **Build metadata.** The kernel embeds `KBUILD_BUILD_TIMESTAMP`, `_USER`, `_HOST`, and
+   assorted build IDs, so wall-clock time and host identity leak into the image unless they
+   are fixed.
+3. **The host OS.** The primary dev host is macOS on Apple Silicon, and a Linux kernel must
+   be built on Linux, so the environment has to bridge that without making the result depend
+   on which side built it.
 
-This is the build-system analogue of the problem substrate solves for its UAPI
-bindings (substrate ADR 0010): pin the whole toolchain and verify byte-identity.
+The first answer was a digest-pinned Debian container. Its pin was shallower than it
+claimed: the digest fixed the base image, and the Dockerfile then ran `apt-get install` with
+no package versions, so rebuilding the image on two different dates installed two different
+compilers. The pin held only for a machine that kept the old image cached, which means the
+toolchain was pinned by accident of caching rather than by construction.
 
 ## Decision
 
-1. **The Linux-only build stages run in a digest-pinned container**
-   (`tools/build/Dockerfile`) carrying a pinned gcc/clang, binutils, make,
-   `python3` + the ELF library the packer needs, and the kernel build
-   dependencies. The container digest is checked in; an unpinned base image or a
-   floating tag is not a reproducible environment.
+1. **The toolchain is pinned by `flake.lock`.** Every compiler, linker, and build utility a
+   derivation uses is a Nix store path fixed by the locked nixpkgs revision, so the toolchain
+   is an input with a content hash rather than a package name resolved at install time.
+   Bumping the lock is an explicit, reviewed change that re-runs the reproducibility gate,
+   exactly like bumping the source pin (ADR 0001).
 
-2. **On macOS the build runs inside that container; on Linux it runs natively
-   against the same pinned toolchain.** A developer on Apple Silicon builds the
-   Linux kernel in the pinned Linux container (the same image CI uses); a Linux
-   host uses the pinned toolchain directly. Both paths must produce the same bytes.
+2. **The build runs in the Nix sandbox.** No ambient host state — PATH, locale, wall clock
+   beyond the fixed metadata, the host's own toolchain — reaches the compile, because the
+   sandbox admits only declared inputs. Cross-host identity stops being a discipline and
+   becomes the construction. The sandbox is load-bearing beyond purity: it builds in a fixed
+   `/build`, whereas an unsandboxed build runs in a per-invocation directory
+   (`/nix/var/nix/builds/nix-<pid>-<rand>`) whose name reaches the GNU build-id that `ld`
+   stamps and `objcopy` then strips, so two unsandboxed builds of byte-identical content stamp
+   different build-ids and repro-check fails on exactly those 20-byte descriptors while every
+   other byte matches. The sandbox needs Linux user namespaces, so the CI runners must be
+   privileged: the Namespace runners carry the `-with-features` and
+   `container.privileged=true` labels for that reason. On an unprivileged runner nix's
+   `sandbox-fallback` silently degrades to an unsandboxed build rather than failing, so the
+   only defence against that regression is repro-check running on every pull request.
 
-3. **Build metadata is fixed.** `KBUILD_BUILD_TIMESTAMP`, `KBUILD_BUILD_USER`, and
-   `KBUILD_BUILD_HOST` are fixed constants passed to the kernel build, and the
-   config disables embedded build IDs / timestamps wherever it can
-   ([design/kernel-config.md](../design/kernel-config.md)). Nothing wall-clock- or
-   host-dependent leaks into the image.
+3. **Each cell builds on one canonical build system** (ADR 0017): x86_64 and aarch64
+   natively on their own architecture, riscv64 cross from x86_64-linux. One canonical system
+   per cell means the question "which toolchain built this" has exactly one answer.
 
-4. **`make repro-check` is the reproducibility gate.** It rebuilds from the pin in
-   the pinned container and asserts byte-identity against a committed digest of the
-   produced bundle; divergence fails the build. This is the §3 law made executable —
-   the build-system counterpart to substrate's `make uapi-check`.
+4. **On macOS the Linux build runs in the nix-darwin `linux-builder` VM**, which builds the
+   same derivations from the same lock; a laptop that only consumes bundles substitutes them
+   from the org cache and needs no builder at all (ADR 0017).
 
-5. **The pin and the environment are co-dependent (ADR 0001).** Reproducibility is
-   only meaningful because the *source* is pinned by sha256 *and* the *toolchain* is
-   pinned by digest; neither alone suffices.
+5. **Build metadata is fixed inside the derivation.** `KBUILD_BUILD_TIMESTAMP`,
+   `KBUILD_BUILD_USER`, and `KBUILD_BUILD_HOST` are constants in `nix/kernel.nix`, and the
+   config disables embedded build IDs and timestamps wherever it can
+   ([design/kernel-config.md](../design/kernel-config.md)).
+
+6. **`just repro-check` is the gate.** `nix build` realizes the cell — by substitution when
+   the cache holds it — and `nix build --rebuild` then compiles it locally and fails if a
+   single byte differs. On a substituted path the gate therefore also proves the cache serves
+   exactly what this commit's source builds, a comparison the container gate could not make.
+
+The switch from Debian's gcc to nixpkgs' gcc changed the bytes of every bundle. That break
+was taken deliberately and once, at this landing, and `KBUILD_BUILD_HOST` was renamed from
+the historical `substrate-kernel` to `substrate-kernels` at the same moment — the Makefile
+had recorded that the rename should ride the next bytes-changing event rather than cause its
+own.
 
 ## Consequences
 
-- The bundle is content-addressable: a digest identifies an exact (source + patches
-  + config + toolchain) tuple, enabling caching, attestation, and confident
-  debugging.
-- A macOS developer and a Linux CI runner produce identical bytes; "works on my
-  machine" cannot diverge the artifact.
-- Bumping the toolchain (a new container digest) is an explicit, reviewed change
-  that re-runs `repro-check`, exactly like bumping the source pin (ADR 0001) — the
-  reproducibility gate would otherwise flag the drift.
-- The container is required only for building; reading the docs, editing patches,
-  and reviewing config need no Docker.
+- The bundle is content-addressable: a digest identifies an exact (source + patches + config
+  + toolchain) tuple, and the toolchain part of that tuple is now a hash in `flake.lock`
+  rather than a container image someone may or may not still have.
+- A macOS developer's VM build and a Linux CI runner's build are the same derivation, so
+  "works on my machine" cannot diverge the artifact.
+- Docker leaves the repository: no image to build, no digest to bump, no drift between the
+  image on one machine and the image on another.
+- The reproducibility claim is scoped per cell to its canonical build system. The gate proves
+  a rebuild on that system is byte-identical; it makes no claim about building the same cell
+  on a foreign system, because no such derivation exists to build.
 
 ## Alternatives considered
 
-- **Build on the host toolchain directly** — rejected: bindgen-style sensitivity
-  applies to kernel builds too; a macOS host and a Linux runner would disagree and
-  `repro-check` would be meaningless (the same reason substrate ADR 0010 containers
-  its bindgen).
-- **A build VM instead of a container** — rejected:
-  a container is the lighter, more widely-available, digest-pinnable environment; a
-  bespoke microVM builder is more moving parts for the same Linux-on-macOS bridge.
-- **Let timestamps/build-IDs vary and compare "functionally equivalent" images** —
-  rejected: "functionally equivalent" is unfalsifiable for a kernel image;
-  byte-identity is the only check that actually proves reproducibility (CLAUDE.md
-  §3).
-- **Pin source but not toolchain** — rejected: source identity without toolchain
-  identity does not yield identical bytes; both pins are required (Decision §5).
+- **Keep the digest-pinned container.** Rejected: the digest pins the base image while the
+  package installs float with the distro archive, so the toolchain drifts on every image
+  rebuild, and the drift is invisible until `repro-check` fails on a machine that rebuilt the
+  image — the failure then points at the kernel rather than at apt.
+- **Build on the host toolchain directly.** Rejected: a macOS host cannot build a Linux
+  kernel at all, and two Linux hosts with different toolchains produce different bytes, which
+  makes the gate meaningless.
+- **Let timestamps and build IDs vary, compare "functionally equivalent" images.** Rejected:
+  functional equivalence is unfalsifiable for a kernel image; byte-identity is the only check
+  that proves reproducibility (CLAUDE.md §3).
+- **Pin source but not toolchain.** Rejected: identical source through two compilers yields
+  two images, so both pins are required for the gate to mean anything.

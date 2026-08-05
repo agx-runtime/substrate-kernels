@@ -24,7 +24,7 @@ than dormant promises.
 | **`NR_CPUS` left high = image bloat** | bounded (left high by default) | set to substrate's max vCPU count, with the number cited | config-invariant gate (exact value) |
 | **PCI policy** — disabling PCI entirely breaks some x86 ACPI paths | PCI disabled; ACPI patched to cope ([patches.md](patches.md) ACPI fixes) | match: PCI off where possible + the x86 ACPI hypervisor patches; document the coupling | boot-smoke (x86) |
 | **DRM/framebuffer pulls in a large subsystem** | GPU configs enabled | **disabled** — GPU is cut (CLAUDE.md §1) | config-invariant gate (forbidden set) |
-| **Reproducibility-hostile config** — embedded build IDs/timestamps | (relies on `KBUILD_BUILD_*`) | also disable embedded IDs/timestamps in config where possible ([ADR 0005](../adr/0005-build-environment-and-reproducibility.md)) | `make repro-check` |
+| **Reproducibility-hostile config** — embedded build IDs/timestamps | (relies on `KBUILD_BUILD_*`) | also disable embedded IDs/timestamps in config where possible ([ADR 0005](../adr/0005-build-environment-and-reproducibility.md)) | `just repro-check` |
 | **Unsupported features must not look releasable** | inherited configs carried deferred features | SEV/TDX, virtio-RTC, FUSE DAX, and emulation-only arm64 ACTLR state are forbidden in every current release cell | config-invariant forbidden set |
 | **Container-runtime netfilter must survive `olddefconfig`** — a container engine programs a broad netfilter/bridge set; a dropped `xt_addrtype` or masquerade target makes dockerd fail to register its bridge driver | (ungated) | assert the Docker-required netfilter/bridge/NAT set on `base`/`debug`; note `BRIDGE_VLAN_FILTERING` *depends on* `VLAN_8021Q` and `IP6_NF_TARGET_MASQUERADE` *depends on* `IP6_NF_NAT` (enable each dep in the same pass) ([ADR 0014](../adr/0014-container-runtime-networking.md)) | config-invariant gate |
 
@@ -187,6 +187,6 @@ rationale.
 
 The config-invariant gate asserts the required-present / forbidden-absent set per
 (arch, variant) after `olddefconfig`; boot-smoke proves the enabled set actually
-boots a guest and drives the wired devices; `make repro-check` proves the config
+boots a guest and drives the wired devices; `just repro-check` proves the config
 (plus fixed metadata) yields byte-identical images
 ([testing/strategy.md](../testing/strategy.md)).

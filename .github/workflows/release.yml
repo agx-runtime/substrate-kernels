@@ -16,8 +16,11 @@ on:
         required: true
         type: string
 
+# id-token lets the build jobs authenticate to the org binary cache with a job-scoped OIDC
+# token; the publish job re-declares the permissions it needs for attestation.
 permissions:
   contents: read
+  id-token: write
 
 concurrency:
   group: release-${{ inputs.commit }}
@@ -82,53 +85,43 @@ jobs:
           echo "Release commit: $resolved"
           echo "Kernel pins: linux $version_612 and linux $version_618"
 
-  # Both lines must build before publish starts: no partial release is possible.
+  # Both lines must build before publish starts: no partial release is possible. Each cell is
+  # the same flake output CI already built and pushed to the org cache at this commit, so a
+  # release build normally substitutes in seconds and compiles only what CI never saw.
   build:
     needs: prepare
     strategy:
       fail-fast: true
       matrix:
         include:
-          - { kernel_line: "6.12", arch: x86_64, rarch: amd64, variant: base }
-          - { kernel_line: "6.12", arch: x86_64, rarch: amd64, variant: debug }
-          - { kernel_line: "6.12", arch: aarch64, rarch: arm64, variant: base }
-          - { kernel_line: "6.12", arch: aarch64, rarch: arm64, variant: debug }
-          - { kernel_line: "6.18", arch: x86_64, rarch: amd64, variant: base }
-          - { kernel_line: "6.18", arch: x86_64, rarch: amd64, variant: debug }
-          - { kernel_line: "6.18", arch: aarch64, rarch: arm64, variant: base }
-          - { kernel_line: "6.18", arch: aarch64, rarch: arm64, variant: debug }
-    runs-on:
-      - nscloud-ubuntu-24.04-${{ matrix.rarch }}-8x16-with-cache;github.run-id=${{ github.run_id }}
-      - nscloud-cache-size-50gb
-      - nscloud-cache-tag-substrate-kernels-${{ matrix.rarch }}
-      - nscloud-container-image-cache
-      - namespace-features:container.privileged=true
+          - { kernel_line: "6.12", line_attr: "6_12", arch: x86_64, rarch: amd64, variant: base }
+          - { kernel_line: "6.12", line_attr: "6_12", arch: x86_64, rarch: amd64, variant: debug }
+          - { kernel_line: "6.12", line_attr: "6_12", arch: aarch64, rarch: arm64, variant: base }
+          - { kernel_line: "6.12", line_attr: "6_12", arch: aarch64, rarch: arm64, variant: debug }
+          - { kernel_line: "6.18", line_attr: "6_18", arch: x86_64, rarch: amd64, variant: base }
+          - { kernel_line: "6.18", line_attr: "6_18", arch: x86_64, rarch: amd64, variant: debug }
+          - { kernel_line: "6.18", line_attr: "6_18", arch: aarch64, rarch: arm64, variant: base }
+          - { kernel_line: "6.18", line_attr: "6_18", arch: aarch64, rarch: arm64, variant: debug }
+    runs-on: nscloud-ubuntu-24.04-${{ matrix.rarch }}-8x16
     steps:
       - uses: actions/checkout@v6
         with:
           ref: ${{ needs.prepare.outputs.commit }}
           fetch-depth: 1
-      - name: Read the selected pin
-        id: pin
-        run: |
-          set -euo pipefail
-          . "scripts/kernel-pins/${{ matrix.kernel_line }}.env"
-          echo "version=$KERNEL_VERSION" >> "$GITHUB_OUTPUT"
-      - name: Cache the pinned kernel tarball
-        uses: actions/cache@v5
+      # Read-only: a release republishes what CI already built and pushed; the lease belongs
+      # to the CI build lane, which runs on every push to main.
+      - uses: agx-runtime/cachet-action@v1 # v1
         with:
-          path: tarballs
-          key: kernel-tarball-${{ matrix.kernel_line }}-${{ hashFiles('scripts/kernel-pins/*.env') }}
-      - name: Build the pinned toolchain container
-        run: docker build -t substrate-kernels-build tools/build
-      - name: Build the bundle (compile + pack) in the pinned container
-        run: |
-          docker run --rm -v "$PWD":/work -w /work substrate-kernels-build \
-            make all KERNEL_LINE=${{ matrix.kernel_line }} ARCH=${{ matrix.arch }} VARIANT=${{ matrix.variant }}
+          push: "false"
+          signing-key: ${{ secrets.CACHET_SIGNING_KEY }}
+      - name: Build the bundle cell
+        run: nix build --print-build-logs '.#kernel-${{ matrix.line_attr }}-${{ matrix.variant }}-${{ matrix.arch }}'
+      - name: Stage the bundle out of the store
+        run: cp -L result/linux-*.kernel .
       - uses: actions/upload-artifact@v7
         with:
           name: bundle-${{ matrix.kernel_line }}-${{ matrix.variant }}-${{ matrix.arch }}
-          path: linux-${{ steps.pin.outputs.version }}-${{ matrix.variant }}-${{ matrix.arch }}.kernel
+          path: linux-*-${{ matrix.variant }}-${{ matrix.arch }}.kernel
           if-no-files-found: error
 
   publish:

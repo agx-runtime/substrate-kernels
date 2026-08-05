@@ -15,7 +15,7 @@ Context → Decision → Consequences → Alternatives considered, with a `Statu
 | [0002](0002-target-architectures.md) | Target architectures | Accepted | architecture.md §4/§8 — x86_64 / aarch64 / riscv64 + windows carried for completeness; CI gates x86_64 + aarch64 |
 | [0003](0003-kernel-bundle-format.md) | The kernel bundle format | Accepted | architecture.md §1/§8 — a fixed header (magic `SUBK`), pre-flattened payload, page alignment |
 | [0004](0004-boot-contract-with-substrate.md) | The boot contract with substrate | Accepted | architecture.md §1/§8 — `load_addr`/`entry_addr` semantics, the x86 64-bit `boot_params` entry, the no-runtime-parser split |
-| [0005](0005-build-environment-and-reproducibility.md) | Build environment and reproducibility | Accepted | architecture.md §2/§8 / CLAUDE.md §3 — the pinned container, fixed build metadata, the byte-identity gate |
+| [0005](0005-build-environment-and-reproducibility.md) | Build environment and reproducibility | Accepted | architecture.md §2/§8 / CLAUDE.md §3 — the `flake.lock` toolchain pin, the Nix sandbox, fixed build metadata, the byte-identity gate |
 | [0006](0006-kernel-config-strategy.md) | Kernel config strategy | Accepted | architecture.md §3/§8 — monolithic, no modules, virtio-only, one `.config` per (arch, variant) |
 | [0007](0007-patch-management-policy.md) | Patch-management policy | Accepted | architecture.md §3/§8 / CLAUDE.md §6 — the ordered series, why-headers, config-over-patch, clean rebase |
 | [0008](0008-kernel-capability-surface-vs-vmm-scope.md) | Kernel capability surface vs VMM device scope | Accepted | architecture.md §5/§8 / CLAUDE.md §1 — what the kernel carries vs what substrate exposes; the security boundary |
@@ -27,6 +27,7 @@ Context → Decision → Consequences → Alternatives considered, with a `Statu
 | [0014](0014-container-runtime-networking.md) | Container-runtime networking (in-guest Docker) | Accepted | design/kernel-config.md — completes the netfilter/bridge/NAT surface (xt `addrtype`, nft/legacy masquerade+reject, ip6tables, VXLAN/MACVLAN/IPVLAN) so `dockerd` runs in the guest; carried on base/debug (x86_64, aarch64) + riscv64 base, gated by config-invariant |
 | [0015](0015-drop-tsi-and-x86-acpi-legacy-pic.md) | Drop the TSI patches and the x86 ACPI legacy_pic patch | Accepted | design/patches.md — drops TSI (`0009`/`0010`, + `CONFIG_TSI`) and the x86 `legacy_pic` fix (`0101`) to trim downstream maintenance; **amends ADR 0008** (TSI no longer carried); the former HW_REDUCED-boot risk is closed by AMD+Intel substrate boots |
 | [0016](0016-release-provenance-attestation.md) | Release provenance attestation | Accepted | release.yml — SLSA build provenance (keyless sigstore via GitHub OIDC) on every release artifact, verified with `gh attestation verify`; the sigstore bundle ships as a release asset and is mirrored to R2 (`linux-<version>-attestations.sigstore.jsonl`) |
+| [0017](0017-nix-build-and-flake-interface.md) | Nix builds the bundles, and the flake is the interface | Accepted | replaces the Makefile + digest-pinned container: one Nix derivation per (line, variant, arch) cell on its canonical build system, the gates as flake checks, `just` verbs as thin aliases over flake outputs, and CI pushing each cell's closure to the org binary cache |
 
 0001 establishes the convention and fixes the pin that roots reproducibility.
 0002–0004 fix the artifact's shape (architectures, bundle format, boot contract).
@@ -44,5 +45,8 @@ container engine such as `dockerd`, gating the set with config-invariant. 0015 t
 the downstream surface — dropping the TSI patches (and `CONFIG_TSI`) and the x86
 `legacy_pic` fix — and amends 0008 (TSI is no longer a carried capability). 0016
 adds SLSA build-provenance attestation to every release artifact, keyless and
-verifiable with `gh attestation verify`.
+verifiable with `gh attestation verify`. 0017 replaces the Makefile and its
+digest-pinned container with Nix: the flake declares one derivation per cell, the
+gates run as flake checks, and CI pushes every cell it builds to the org binary
+cache.
 Further decisions get their own numbered ADR here as they land.

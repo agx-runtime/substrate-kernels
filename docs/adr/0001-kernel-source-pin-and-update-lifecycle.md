@@ -37,8 +37,12 @@ Two further facts shape the choice:
    a flag day.
 
 2. **Pins live in `scripts/kernel-pins/<line>.env`: a version *and* a sha256.** The
-   build fetches the tarball over HTTPS from kernel.org at the pinned tag and
-   **verifies it against the checked-in sha256 before extraction.** A hash
+   pin files stay in `KEY=value` shell form because two consumers read them:
+   `nix/pins.nix` parses a pin file for the flake's fixed-output fetch, and
+   `release.yml` sources it with `.` to name its artifacts — one file per line, so
+   the two cannot disagree. Nix fetches the tarball from the pinned kernel.org URL
+   (falling back to the pinned mirror URL) and verifies it against the checked-in
+   sha256 before any derivation may use it. A hash
    mismatch fails the build; the source is never trusted on the version string
    alone.
 
@@ -49,13 +53,14 @@ Two further facts shape the choice:
    `olddefconfig` and the config-invariant gate, and re-run boot-smoke. A patch
    that no longer applies is **re-derived, never forced** with fuzz.
 
-4. **Selection is explicit.** `KERNEL_LINE=6.12` is the default;
-   `KERNEL_LINE=6.18` selects the newer line. Build directories, bundles, and CI
-   artifacts include the chosen exact version so both lines coexist without
-   overwriting one another. A manual release builds and publishes both selections
-   atomically from one exact repository commit.
+4. **Selection is explicit.** The `6.12` line is the default; `just line=6.18
+   build` selects the newer line. Every flake attribute carries its line in the
+   name (`kernel-6_18-base-x86_64`), and every bundle file name carries the chosen
+   exact version, so the two lines' outputs are distinct store paths and artifacts
+   that coexist without overwriting one another. A manual release builds and
+   publishes both selections atomically from one exact repository commit.
 
-5. **The pin is the root of every reproducibility claim.** `make repro-check`
+5. **The pin is the root of every reproducibility claim.** `just repro-check`
    (ADR 0005) is meaningful only because the source is pinned by hash; the two
    ADRs are co-dependent.
 

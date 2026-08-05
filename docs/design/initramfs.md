@@ -13,7 +13,7 @@ of coupling it to a kernel release.
 - `CONFIG_BLK_DEV_INITRD=y` keeps that runtime path available even though the
   `.kernel` bundle itself has no baked initrd.
 - The `SUBK` format and packer retain optional qboot/initrd fields for format
-  compatibility, but no current Makefile variant populates them.
+  compatibility, but no cell in the flake's matrix populates them.
 
 The removed SEV/TDX variants had planned prebuilt firmware and secret-retrieval
 initrds, but those assets were never wired into releasable bundles and substrate

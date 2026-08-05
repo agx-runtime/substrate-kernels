@@ -38,8 +38,9 @@ depth cap or behind ordinary Markdown links.
    an `@`-import inside a code span/fence is ignored, the manifest lines are plain
    text; the check script enforces this shape.
 
-4. **The gate runs in `make ci`** alongside the other build gates (ADR per
-   [testing/strategy.md](../testing/strategy.md)), so manifest drift is caught in
+4. **The gate runs as a flake check.** `nix flake check` (the `just ci` verb) and
+   CI's gates job run it alongside the other static gates
+   ([testing/strategy.md](../testing/strategy.md)), so manifest drift is caught in
    the same place as a failed patch-apply or config-invariant.
 
 ## Consequences

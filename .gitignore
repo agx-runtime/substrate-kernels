@@ -1,9 +1,17 @@
-# The patched kernel tree is derived from pin + patches — never checked in (ADR 0007).
+# Nix build outputs: `nix build` writes a ./result symlink per invocation (ADR 0017).
+/result
+/result-*
+# Leftovers from the retired Makefile pipeline, still on disk in older checkouts.
 /build/
-# Fetched, sha256-verified tarballs — reconstructible from the pin (ADR 0001).
 /tarballs/
-# Produced bundles.
+# direnv's cache for the dev shell.
+/.direnv/
+# Produced bundles, when copied out of the store by hand.
 *.kernel
 # Local Python noise.
 __pycache__/
 *.pyc
+/venv/
+# Editor and OS noise.
+/.idea/
+.DS_Store
